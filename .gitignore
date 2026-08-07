@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.env
+*.js.map
+*.d.ts.map
+coverage/
+prisma/migrations/
+
+.opencode-anchor.md
+API_DOCUMENTATION.md
+
+seed.ts
+
+build-errors.log
+build.log
+build-errors-after-admin.log

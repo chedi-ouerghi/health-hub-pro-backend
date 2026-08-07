@@ -1,0 +1,631 @@
+// ============================================================================
+// SCHEMA PRISMA — PLATEFORME MÉDICALE (RENDEZ-VOUS EN PRÉSENTIEL UNIQUEMENT)
+// ============================================================================
+// Notes de conception :
+// - Aucune notion de consultation vidéo / téléphone : un seul mode de RDV,
+//   toujours "sur place" (in-clinic). Le champ type a donc été supprimé,
+//   remplacé par l'adresse du cabinet rattachée au médecin (snapshotée sur
+//   le RDV pour garder une trace historique fiable).
+// - Authentification "pro" : User = compte technique (email/password/role),
+//   séparé des profils métier (Patient / Doctor / Admin) -> permet une
+//   évolution propre (SSO, 2FA, multi-rôles) sans polluer les données métier.
+// - Normalisation forte (Specialty, Language, FocusArea, Education,
+//   Certificate) au lieu de tableaux JSON -> intégrité référentielle,
+//   requêtes/filtre performantes, indexation ciblée.
+// - Décimaux pour tout ce qui touche à l'argent (jamais de Float).
+// - Soft delete (deletedAt) sur les entités sensibles (RGPD / données de
+//   santé) plutôt que suppression physique.
+// ============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// AUTHENTIFICATION & SÉCURITÉ
+// ============================================================================
+
+enum UserRole {
+  PATIENT
+  DOCTOR
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum UserStatus {
+  PENDING_VERIFICATION
+  ACTIVE
+  SUSPENDED
+  DEACTIVATED
+}
+
+model User {
+  id       String     @id @default(cuid())
+  email    String     @unique
+  phone    String?    @unique
+  password String // hash (argon2id / bcrypt), jamais en clair
+  role     UserRole
+  status   UserStatus @default(PENDING_VERIFICATION)
+
+  emailVerifiedAt DateTime?
+  phoneVerifiedAt DateTime?
+
+  twoFactorEnabled Boolean @default(false)
+  twoFactorSecret  String? // chiffré au niveau applicatif
+
+  failedLoginCount Int       @default(0)
+  lockedUntil      DateTime? // verrouillage temporaire anti brute-force
+  lastLoginAt      DateTime?
+  lastLoginIp      String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime? // soft delete (RGPD)
+
+  patient Patient?
+  doctor  Doctor?
+  admin   Admin?
+
+  sessions              Session[]
+  refreshTokens         RefreshToken[]
+  passwordResetTokens   PasswordResetToken[]
+  emailVerificationTokens EmailVerificationToken[]
+  loginAttempts         LoginAttempt[]
+  auditLogs             AuditLog[]
+  notifications         Notification[]
+
+  @@index([role, status])
+  @@index([email])
+  @@map("users")
+}
+
+enum DeviceType {
+  DESKTOP
+  MOBILE
+  TABLET
+  UNKNOWN
+}
+
+// Sessions actives / appareils connectés (équivalent de la liste "devices")
+model Session {
+  id           String     @id @default(cuid())
+  userId       String
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash    String     @unique // hash du session token, jamais stocké en clair
+  deviceName   String?
+  deviceType   DeviceType @default(UNKNOWN)
+  ipAddress    String?
+  location     String?
+  userAgent    String?
+  isCurrent    Boolean    @default(false)
+  lastActiveAt DateTime   @default(now())
+  expiresAt    DateTime
+  createdAt    DateTime   @default(now())
+  revokedAt    DateTime?
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model RefreshToken {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash   String    @unique
+  createdByIp String?
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  replacedBy  String?
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@map("password_reset_tokens")
+}
+
+model EmailVerificationToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@map("email_verification_tokens")
+}
+
+// Journal des tentatives de connexion (succès / échec) -> détection brute-force
+model LoginAttempt {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  email     String
+  ipAddress String?
+  userAgent String?
+  success   Boolean
+  createdAt DateTime @default(now())
+
+  @@index([email, createdAt])
+  @@index([ipAddress, createdAt])
+  @@map("login_attempts")
+}
+
+// Piste d'audit générale (traçabilité, exigée sur une plateforme médicale)
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action     String // ex: "APPOINTMENT_CANCELLED", "PROFILE_UPDATED"
+  entityType String? // ex: "Appointment"
+  entityId   String?
+  metadata   Json?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([entityType, entityId])
+  @@map("audit_logs")
+}
+
+model Admin {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  firstName String
+  lastName  String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("admins")
+}
+
+// ============================================================================
+// RÉFÉRENTIELS (normalisés, réutilisables et filtrables efficacement)
+// ============================================================================
+
+model Specialty {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  slug        String   @unique
+  description String?
+  doctors     Doctor[]
+
+  @@map("specialties")
+}
+
+model Language {
+  id      String           @id @default(cuid())
+  name    String           @unique
+  code    String           @unique // ISO 639-1, ex: "fr", "en"
+  doctors DoctorLanguage[]
+
+  @@map("languages")
+}
+
+model FocusArea {
+  id      String              @id @default(cuid())
+  name    String              @unique
+  doctors DoctorFocusArea[]
+
+  @@map("focus_areas")
+}
+
+// ============================================================================
+// MÉDECIN
+// ============================================================================
+
+model Doctor {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  firstName String
+  lastName  String
+  photoUrl  String?
+
+  specialtyId String
+  specialty   Specialty @relation(fields: [specialtyId], references: [id])
+
+  licenseNumber      String  @unique
+  isLicenseVerified  Boolean @default(false)
+  yearsOfExperience  Int     @default(0)
+  bio                String? @db.Text
+
+  consultationPrice Decimal @db.Decimal(10, 2)
+  currency          String  @default("USD")
+
+  // Le RDV est toujours en présentiel : ces champs définissent le lieu unique
+  clinicName    String
+  addressLine   String
+  city          String
+  country       String
+  latitude      Decimal? @db.Decimal(9, 6)
+  longitude     Decimal? @db.Decimal(9, 6)
+
+  ratingAverage      Decimal @default(0) @db.Decimal(2, 1)
+  reviewCount        Int     @default(0)
+  patientCount       Int     @default(0)
+  recommendationRate Decimal @default(0) @db.Decimal(4, 1) // en %
+
+  isAcceptingNewPatients Boolean @default(true)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  educations   Education[]
+  certificates Certificate[]
+  focusAreas   DoctorFocusArea[]
+  languages    DoctorLanguage[]
+  availabilities Availability[]
+  appointments Appointment[]
+  reviews      Review[]
+  prescribedMedications Medication[]
+  recordedVitals   VitalRecord[]
+
+  @@index([specialtyId])
+  @@index([city, country])
+  @@index([ratingAverage])
+  @@map("doctors")
+}
+
+model Education {
+  id        String @id @default(cuid())
+  doctorId  String
+  doctor    Doctor @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  school    String
+  degree    String
+  startYear Int
+  endYear   Int?
+
+  @@index([doctorId])
+  @@map("doctor_educations")
+}
+
+model Certificate {
+  id         String    @id @default(cuid())
+  doctorId   String
+  doctor     Doctor    @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  name       String
+  issuedBy   String?
+  issuedAt   DateTime?
+
+  @@index([doctorId])
+  @@map("doctor_certificates")
+}
+
+// Table de jointure explicite (m2m) avec possibilité d'ajout de metadata plus tard
+model DoctorFocusArea {
+  doctorId    String
+  doctor      Doctor    @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  focusAreaId String
+  focusArea   FocusArea @relation(fields: [focusAreaId], references: [id], onDelete: Cascade)
+
+  @@id([doctorId, focusAreaId])
+  @@map("doctor_focus_areas")
+}
+
+model DoctorLanguage {
+  doctorId   String
+  doctor     Doctor   @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  languageId String
+  language   Language @relation(fields: [languageId], references: [id], onDelete: Cascade)
+
+  @@id([doctorId, languageId])
+  @@map("doctor_languages")
+}
+
+enum DayOfWeek {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+  SUNDAY
+}
+
+// Créneaux récurrents disponibles pour la prise de RDV sur place
+model Availability {
+  id        String    @id @default(cuid())
+  doctorId  String
+  doctor    Doctor    @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  dayOfWeek DayOfWeek
+  startTime String // "09:00"
+  endTime   String // "17:00"
+  slotMinutes Int     @default(30)
+  isActive  Boolean   @default(true)
+
+  @@unique([doctorId, dayOfWeek, startTime])
+  @@index([doctorId])
+  @@map("doctor_availabilities")
+}
+
+// ============================================================================
+// PATIENT
+// ============================================================================
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+  UNDISCLOSED
+}
+
+enum BloodType {
+  A_POS
+  A_NEG
+  B_POS
+  B_NEG
+  AB_POS
+  AB_NEG
+  O_POS
+  O_NEG
+  UNKNOWN
+}
+
+model Patient {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  firstName   String
+  lastName    String
+  photoUrl    String?
+  dateOfBirth DateTime?
+  gender      Gender?
+  bloodType   BloodType @default(UNKNOWN)
+
+  addressLine String?
+  city        String?
+  country     String?
+
+  membershipPlan String   @default("Standard")
+  memberSince    DateTime @default(now())
+
+  emergencyContactName     String?
+  emergencyContactRelation String?
+  emergencyContactPhone    String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  appointments   Appointment[]
+  reviews        Review[]
+  medications    Medication[]
+  vitalRecords   VitalRecord[]
+  activityLogs   ActivityLog[]
+
+  @@map("patients")
+}
+
+// ============================================================================
+// RENDEZ-VOUS (TOUJOURS SUR PLACE) & FACTURATION
+// ============================================================================
+
+enum AppointmentStatus {
+  UPCOMING
+  COMPLETED
+  CANCELLED
+  RESCHEDULED
+  NO_SHOW
+}
+
+model Appointment {
+  id String @id @default(cuid())
+
+  patientId String
+  patient   Patient @relation(fields: [patientId], references: [id], onDelete: Restrict)
+
+  doctorId String
+  doctor   Doctor @relation(fields: [doctorId], references: [id], onDelete: Restrict)
+
+  scheduledAt     DateTime // date + heure du RDV
+  durationMinutes Int      @default(30)
+
+  // Snapshot de l'adresse du cabinet au moment de la prise de RDV
+  // (garde un historique fiable même si le médecin déménage plus tard)
+  clinicAddressSnapshot String
+
+  status       AppointmentStatus @default(UPCOMING)
+  price        Decimal           @db.Decimal(10, 2)
+  currency     String            @default("USD")
+  notes        String?           @db.Text
+  cancelReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  invoice Invoice?
+  review  Review?
+
+  // Empêche deux RDV au même créneau pour le même médecin
+  @@unique([doctorId, scheduledAt])
+  @@index([patientId, scheduledAt])
+  @@index([status])
+  @@map("appointments")
+}
+
+enum InvoiceStatus {
+  PENDING
+  PAID
+  REFUNDED
+  FAILED
+}
+
+model Invoice {
+  id            String        @id @default(cuid())
+  appointmentId String        @unique
+  appointment   Appointment   @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  invoiceNumber String        @unique
+  amount        Decimal       @db.Decimal(10, 2)
+  currency      String        @default("USD")
+  status        InvoiceStatus @default(PENDING)
+  paymentMethod String?
+  paidAt        DateTime?
+  createdAt     DateTime      @default(now())
+
+  @@map("invoices")
+}
+
+model Review {
+  id String @id @default(cuid())
+
+  patientId String
+  patient   Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  doctorId String
+  doctor   Doctor @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+
+  appointmentId String?      @unique
+  appointment   Appointment? @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+
+  rating  Int // 1 à 5, contrainte à valider côté applicatif / CHECK constraint SQL
+  comment String? @db.Text
+
+  createdAt DateTime @default(now())
+
+  @@index([doctorId])
+  @@index([patientId])
+  @@map("reviews")
+}
+
+// ============================================================================
+// SUIVI MÉDICAL DU PATIENT
+// ============================================================================
+
+model Medication {
+  id       String  @id @default(cuid())
+  patientId String
+  patient  Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  // Renseigné quand le médicament est prescrit par un médecin
+  prescribedByDoctorId String?
+  prescribedByDoctor   Doctor? @relation(fields: [prescribedByDoctorId], references: [id], onDelete: SetNull)
+
+  name          String
+  dose          String
+  scheduledTime String // "08:00"
+  isActive      Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  logs MedicationLog[]
+
+  @@index([patientId])
+  @@index([prescribedByDoctorId])
+  @@map("medications")
+}
+
+enum MedicationLogStatus {
+  TAKEN
+  MISSED
+  SKIPPED
+}
+
+model MedicationLog {
+  id           String               @id @default(cuid())
+  medicationId String
+  medication   Medication           @relation(fields: [medicationId], references: [id], onDelete: Cascade)
+  status       MedicationLogStatus
+  loggedAt     DateTime             @default(now())
+
+  @@index([medicationId, loggedAt])
+  @@map("medication_logs")
+}
+
+model VitalRecord {
+  id        String   @id @default(cuid())
+  patientId String
+  patient   Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  // Renseigné quand la mesure est relevée par un médecin
+  recordedByDoctorId String?
+  recordedByDoctor   Doctor? @relation(fields: [recordedByDoctorId], references: [id], onDelete: SetNull)
+
+  recordedAt DateTime @default(now())
+  heartRate  Int?
+  systolic   Int?
+  diastolic  Int?
+  sleepHours Decimal? @db.Decimal(3, 1)
+  steps      Int?
+
+  @@index([patientId, recordedAt])
+  @@index([recordedByDoctorId])
+  @@map("vital_records")
+}
+
+// ============================================================================
+// NOTIFICATIONS & ACTIVITÉ
+// ============================================================================
+
+enum NotificationType {
+  APPOINTMENT_REMINDER
+  APPOINTMENT_CONFIRMED
+  APPOINTMENT_CANCELLED
+  LAB_RESULT
+  PRESCRIPTION
+  INVOICE
+  SYSTEM
+}
+
+model Notification {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  type   NotificationType
+  title  String
+  body   String
+  isRead Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, isRead])
+  @@map("notifications")
+}
+
+enum ActivityType {
+  FILE
+  PRESCRIPTION
+  APPOINTMENT
+  INVOICE
+  MESSAGE
+}
+
+model ActivityLog {
+  id        String       @id @default(cuid())
+  patientId String
+  patient   Patient      @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  type  ActivityType
+  title String
+  meta  String?
+
+  createdAt DateTime @default(now())
+
+  @@index([patientId, createdAt])
+  @@map("activity_logs")
+}
