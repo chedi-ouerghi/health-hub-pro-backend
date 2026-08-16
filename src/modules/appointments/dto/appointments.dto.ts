@@ -59,6 +59,12 @@ export class UpdateAppointmentStatusDto {
   cancelReason?: string;
 }
 
+export class RescheduleAppointmentDto {
+  @ApiProperty({ example: '2026-09-08T10:30:00.000Z', description: 'New appointment datetime (ISO 8601 UTC)' })
+  @IsISO8601()
+  scheduledAt: string;
+}
+
 export class FilterAppointmentsDto {
   @ApiPropertyOptional({ enum: AppointmentStatus })
   @IsOptional()

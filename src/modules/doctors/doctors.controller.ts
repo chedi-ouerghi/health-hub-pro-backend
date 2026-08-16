@@ -9,9 +9,20 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiBearerAuth, ApiParam, ApiResponse, ApiQuery } from '@nestjs/swagger';
 import { DoctorsService } from './doctors.service';
-import { FilterDoctorsDto, CreateAvailabilityDto, UpdateAvailabilityDto } from './dto/doctors.dto';
+import {
+  FilterDoctorsDto,
+  CreateAvailabilityDto,
+  UpdateAvailabilityDto,
+  CreateEducationDto,
+  UpdateEducationDto,
+  CreateCertificateDto,
+  UpdateCertificateDto,
+  AddFocusAreaDto,
+  AddLanguageDto,
+  SearchDoctorsDto,
+} from './dto/doctors.dto';
 import { UpdateDoctorProfileDto } from '../users/dto/update-profile.dto';
 import { Public } from '../../common/decorators/public.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -33,6 +44,18 @@ export class DoctorsController {
   @ApiOperation({ summary: 'List doctors with filters' })
   findAll(@Query() filter: FilterDoctorsDto) {
     return this.doctorsService.findAll(filter);
+  }
+
+  // ── Public advanced search (must be declared BEFORE :id) ────────────────────
+
+  @Public()
+  @Get('search')
+  @ApiOperation({ summary: 'Advanced combined doctor search (query, specialty, city, language, price range)' })
+  @ApiQuery({ name: 'query', required: false, description: 'Free-text on name / clinic / specialty' })
+  @ApiQuery({ name: 'specialty', required: false, description: 'Specialty name, slug or ID' })
+  @ApiQuery({ name: 'language', required: false, description: 'Language name or ISO code' })
+  search(@Query() filter: SearchDoctorsDto) {
+    return this.doctorsService.search(filter);
   }
 
   // ── Doctor own profile update ─────────────────────────────────────────────────
@@ -116,5 +139,167 @@ export class DoctorsController {
     @Query() pagination: PaginationDto,
   ) {
     return this.doctorsService.getDoctorReviews(id, pagination.page, pagination.limit);
+  }
+
+  // ── Education ─────────────────────────────────────────────────────────────────
+
+  @Public()
+  @Get(':id/education')
+  @ApiOperation({ summary: "List doctor's education history" })
+  @ApiParam({ name: 'id' })
+  getEducations(
+    @Param('id', ParseCuidPipe) id: string,
+    @Query() pagination: PaginationDto,
+  ) {
+    return this.doctorsService.getDoctorEducations(id, pagination.page, pagination.limit);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(RolesGuard)
+  @Roles('DOCTOR')
+  @Post('me/education')
+  @ApiOperation({ summary: 'Add an education record to my profile' })
+  createEducation(@CurrentUser('id') userId: string, @Body() dto: CreateEducationDto) {
+    return this.doctorsService.createEducation(userId, dto);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(RolesGuard)
+  @Roles('DOCTOR')
+  @Patch('me/education/:educationId')
+  @ApiOperation({ summary: 'Update one of my education records' })
+  @ApiParam({ name: 'educationId' })
+  updateEducation(
+    @CurrentUser('id') userId: string,
+    @Param('educationId', ParseCuidPipe) educationId: string,
+    @Body() dto: UpdateEducationDto,
+  ) {
+    return this.doctorsService.updateEducation(userId, educationId, dto);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(RolesGuard)
+  @Roles('DOCTOR')
+  @Delete('me/education/:educationId')
+  @ApiOperation({ summary: 'Delete one of my education records' })
+  @ApiParam({ name: 'educationId' })
+  deleteEducation(
+    @CurrentUser('id') userId: string,
+    @Param('educationId', ParseCuidPipe) educationId: string,
+  ) {
+    return this.doctorsService.deleteEducation(userId, educationId);
+  }
+
+  // ── Certificates ──────────────────────────────────────────────────────────────
+
+  @Public()
+  @Get(':id/certificates')
+  @ApiOperation({ summary: "List doctor's certificates" })
+  @ApiParam({ name: 'id' })
+  getCertificates(
+    @Param('id', ParseCuidPipe) id: string,
+    @Query() pagination: PaginationDto,
+  ) {
+    return this.doctorsService.getDoctorCertificates(id, pagination.page, pagination.limit);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(RolesGuard)
+  @Roles('DOCTOR')
+  @Post('me/certificates')
+  @ApiOperation({ summary: 'Add a certificate to my profile' })
+  createCertificate(@CurrentUser('id') userId: string, @Body() dto: CreateCertificateDto) {
+    return this.doctorsService.createCertificate(userId, dto);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(RolesGuard)
+  @Roles('DOCTOR')
+  @Patch('me/certificates/:certificateId')
+  @ApiOperation({ summary: 'Update one of my certificates' })
+  @ApiParam({ name: 'certificateId' })
+  updateCertificate(
+    @CurrentUser('id') userId: string,
+    @Param('certificateId', ParseCuidPipe) certificateId: string,
+    @Body() dto: UpdateCertificateDto,
+  ) {
+    return this.doctorsService.updateCertificate(userId, certificateId, dto);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(RolesGuard)
+  @Roles('DOCTOR')
+  @Delete('me/certificates/:certificateId')
+  @ApiOperation({ summary: 'Delete one of my certificates' })
+  @ApiParam({ name: 'certificateId' })
+  deleteCertificate(
+    @CurrentUser('id') userId: string,
+    @Param('certificateId', ParseCuidPipe) certificateId: string,
+  ) {
+    return this.doctorsService.deleteCertificate(userId, certificateId);
+  }
+
+  // ── Focus areas ───────────────────────────────────────────────────────────────
+
+  @Public()
+  @Get(':id/focus-areas')
+  @ApiOperation({ summary: "List doctor's focus areas" })
+  @ApiParam({ name: 'id' })
+  getFocusAreas(@Param('id', ParseCuidPipe) id: string) {
+    return this.doctorsService.getDoctorFocusAreas(id);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(RolesGuard)
+  @Roles('DOCTOR')
+  @Post('me/focus-areas')
+  @ApiOperation({ summary: 'Add a focus area to my profile' })
+  addFocusArea(@CurrentUser('id') userId: string, @Body() dto: AddFocusAreaDto) {
+    return this.doctorsService.addFocusArea(userId, dto);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(RolesGuard)
+  @Roles('DOCTOR')
+  @Delete('me/focus-areas/:focusAreaId')
+  @ApiOperation({ summary: 'Remove a focus area from my profile' })
+  @ApiParam({ name: 'focusAreaId' })
+  removeFocusArea(
+    @CurrentUser('id') userId: string,
+    @Param('focusAreaId', ParseCuidPipe) focusAreaId: string,
+  ) {
+    return this.doctorsService.removeFocusArea(userId, focusAreaId);
+  }
+
+  // ── Languages ─────────────────────────────────────────────────────────────────
+
+  @Public()
+  @Get(':id/languages')
+  @ApiOperation({ summary: "List doctor's spoken languages" })
+  @ApiParam({ name: 'id' })
+  getLanguages(@Param('id', ParseCuidPipe) id: string) {
+    return this.doctorsService.getDoctorLanguages(id);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(RolesGuard)
+  @Roles('DOCTOR')
+  @Post('me/languages')
+  @ApiOperation({ summary: 'Add a language to my profile' })
+  addLanguage(@CurrentUser('id') userId: string, @Body() dto: AddLanguageDto) {
+    return this.doctorsService.addLanguage(userId, dto);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(RolesGuard)
+  @Roles('DOCTOR')
+  @Delete('me/languages/:languageId')
+  @ApiOperation({ summary: 'Remove a language from my profile' })
+  @ApiParam({ name: 'languageId' })
+  removeLanguage(
+    @CurrentUser('id') userId: string,
+    @Param('languageId', ParseCuidPipe) languageId: string,
+  ) {
+    return this.doctorsService.removeLanguage(userId, languageId);
   }
 }

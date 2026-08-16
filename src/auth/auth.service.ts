@@ -18,7 +18,7 @@ import {
   ForgotPasswordDto,
   ResetPasswordDto,
 } from './dto/auth.dto';
-import { UserRole } from '@prisma/client';
+import { UserRole, DeviceType } from '@prisma/client';
 import { randomBytes } from 'crypto';
 
 const MAX_FAILED_LOGINS = 5;
@@ -183,7 +183,42 @@ export class AuthService {
 
     await recordAttempt(true);
 
-    const tokens = await this._issueTokens(user.id, user.email, user.role, ip);
+    // Track an active session (device) bound to the refresh token lifecycle
+    const refreshExpiresIn = this.config.get<string>('JWT_REFRESH_EXPIRES_IN') ?? '7d';
+    const refreshMs = this._parseDuration(refreshExpiresIn);
+    let sessionId: string | undefined;
+    await this.prisma.$transaction(async (tx) => {
+      await tx.session.updateMany({
+        where: { userId: user.id },
+        data: { isCurrent: false },
+      });
+      // Placeholder fingerprint — replaced by the real refresh-token hash below
+      const sessionRecord = await tx.session.create({
+        data: {
+          userId: user.id,
+          tokenHash: hashToken(randomBytes(32).toString('hex')),
+          deviceName: AuthService._detectDeviceName(userAgent),
+          deviceType: AuthService._detectDeviceType(userAgent),
+          ipAddress: ip,
+          userAgent,
+          isCurrent: true,
+          lastActiveAt: new Date(),
+          expiresAt: new Date(Date.now() + refreshMs),
+        },
+      });
+      sessionId = sessionRecord?.id;
+    });
+
+    // Session must exist BEFORE issuing tokens so the JWT carries the sessionId
+    const tokens = await this._issueTokens(user.id, user.email, user.role, ip, sessionId);
+
+    // Bind the session to the actual refresh-token fingerprint
+    if (sessionId) {
+      await this.prisma.session.update({
+        where: { id: sessionId },
+        data: { tokenHash: hashToken(tokens.refreshToken) },
+      });
+    }
 
     await this.prisma.auditLog.create({
       data: {
@@ -219,7 +254,28 @@ export class AuthService {
       data: { revokedAt: new Date() },
     });
 
-    return this._issueTokens(stored.userId, stored.user.email, stored.user.role);
+    // Keep the bound device session alive across rotations: rebind its
+    // fingerprint to the new refresh token and refresh its activity marker.
+    let sessionId: string | undefined;
+    const boundSession = await this.prisma.session.findUnique({ where: { tokenHash } });
+    if (boundSession) {
+      sessionId = boundSession.id;
+      await this.prisma.session.update({
+        where: { id: boundSession.id },
+        data: { isCurrent: true, lastActiveAt: new Date() },
+      });
+    }
+
+    const tokens = await this._issueTokens(stored.userId, stored.user.email, stored.user.role, undefined, sessionId);
+
+    if (boundSession) {
+      await this.prisma.session.update({
+        where: { id: boundSession.id },
+        data: { tokenHash: hashToken(tokens.refreshToken) },
+      });
+    }
+
+    return tokens;
   }
 
   // ── Logout ───────────────────────────────────────────────────────────────────
@@ -231,9 +287,19 @@ export class AuthService {
         where: { userId, tokenHash, revokedAt: null },
         data: { revokedAt: new Date() },
       });
+      // Revoke the matching device session
+      await this.prisma.session.updateMany({
+        where: { userId, tokenHash, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
     } else {
       // Revoke all active refresh tokens for this user
       await this.prisma.refreshToken.updateMany({
+        where: { userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      // Revoke all active sessions for this user
+      await this.prisma.session.updateMany({
         where: { userId, revokedAt: null },
         data: { revokedAt: new Date() },
       });
@@ -350,8 +416,23 @@ export class AuthService {
 
   // ── Private helpers ───────────────────────────────────────────────────────────
 
-  private async _issueTokens(userId: string, email: string, role: string, ip?: string) {
-    const payload = { sub: userId, email, role };
+  /** Basic device name extraction from a User-Agent string (fallback "Unknown device"). */
+  private static _detectDeviceName(userAgent?: string): string | undefined {
+    if (!userAgent) return undefined;
+    const match = userAgent.match(/^([^/\s]+)[/ ]([^\s]+)/);
+    return match ? `${match[1]} ${match[2]}`.slice(0, 64) : userAgent.split(' ')[0]?.slice(0, 64);
+  }
+
+  /** Basic device type detection from a User-Agent string. */
+  private static _detectDeviceType(userAgent?: string): DeviceType {
+    const ua = userAgent?.toLowerCase() ?? '';
+    if (/ipad|tablet|playbook|silk/.test(ua)) return DeviceType.TABLET;
+    if (/mobi|android|iphone|ipod|blackberry|windows phone/.test(ua)) return DeviceType.MOBILE;
+    return DeviceType.DESKTOP;
+  }
+
+  private async _issueTokens(userId: string, email: string, role: string, ip?: string, sessionId?: string) {
+    const payload = { sub: userId, email, role, ...(sessionId ? { sessionId } : {}) };
 
     const accessToken = this.jwt.sign(payload, {
       secret: this.config.get<string>('JWT_SECRET'),

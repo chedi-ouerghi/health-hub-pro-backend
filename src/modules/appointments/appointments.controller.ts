@@ -16,6 +16,7 @@ import { AppointmentsService } from './appointments.service';
 import {
   CreateAppointmentDto,
   UpdateAppointmentStatusDto,
+  RescheduleAppointmentDto,
   FilterAppointmentsDto,
 } from './dto/appointments.dto';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -78,6 +79,20 @@ export class AppointmentsController {
     @Body() dto: UpdateAppointmentStatusDto,
   ) {
     return this.appointmentsService.updateStatus(userId, role, id, dto);
+  }
+
+  // ── Reschedule (patient owner or doctor) ────────────────────────────────────
+
+  @Patch(':id/reschedule')
+  @ApiOperation({ summary: 'Reschedule an UPCOMING appointment (patient owner or doctor of the appointment)' })
+  @ApiParam({ name: 'id' })
+  reschedule(
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') role: string,
+    @Param('id', ParseCuidPipe) id: string,
+    @Body() dto: RescheduleAppointmentDto,
+  ) {
+    return this.appointmentsService.reschedule(userId, role, id, dto);
   }
 
   // ── Patient cancel ───────────────────────────────────────────────────────────

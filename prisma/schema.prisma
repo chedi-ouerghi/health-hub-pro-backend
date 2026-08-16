@@ -71,13 +71,13 @@ model User {
   doctor  Doctor?
   admin   Admin?
 
-  sessions              Session[]
-  refreshTokens         RefreshToken[]
-  passwordResetTokens   PasswordResetToken[]
+  sessions                Session[]
+  refreshTokens           RefreshToken[]
+  passwordResetTokens     PasswordResetToken[]
   emailVerificationTokens EmailVerificationToken[]
-  loginAttempts         LoginAttempt[]
-  auditLogs             AuditLog[]
-  notifications         Notification[]
+  loginAttempts           LoginAttempt[]
+  auditLogs               AuditLog[]
+  notifications           Notification[]
 
   @@index([role, status])
   @@index([email])
@@ -223,8 +223,8 @@ model Language {
 }
 
 model FocusArea {
-  id      String              @id @default(cuid())
-  name    String              @unique
+  id      String            @id @default(cuid())
+  name    String            @unique
   doctors DoctorFocusArea[]
 
   @@map("focus_areas")
@@ -246,21 +246,21 @@ model Doctor {
   specialtyId String
   specialty   Specialty @relation(fields: [specialtyId], references: [id])
 
-  licenseNumber      String  @unique
-  isLicenseVerified  Boolean @default(false)
-  yearsOfExperience  Int     @default(0)
-  bio                String? @db.Text
+  licenseNumber     String  @unique
+  isLicenseVerified Boolean @default(false)
+  yearsOfExperience Int     @default(0)
+  bio               String? @db.Text
 
   consultationPrice Decimal @db.Decimal(10, 2)
   currency          String  @default("USD")
 
   // Le RDV est toujours en présentiel : ces champs définissent le lieu unique
-  clinicName    String
-  addressLine   String
-  city          String
-  country       String
-  latitude      Decimal? @db.Decimal(9, 6)
-  longitude     Decimal? @db.Decimal(9, 6)
+  clinicName  String
+  addressLine String
+  city        String
+  country     String
+  latitude    Decimal? @db.Decimal(9, 6)
+  longitude   Decimal? @db.Decimal(9, 6)
 
   ratingAverage      Decimal @default(0) @db.Decimal(2, 1)
   reviewCount        Int     @default(0)
@@ -273,15 +273,15 @@ model Doctor {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  educations   Education[]
-  certificates Certificate[]
-  focusAreas   DoctorFocusArea[]
-  languages    DoctorLanguage[]
-  availabilities Availability[]
-  appointments Appointment[]
-  reviews      Review[]
+  educations            Education[]
+  certificates          Certificate[]
+  focusAreas            DoctorFocusArea[]
+  languages             DoctorLanguage[]
+  availabilities        Availability[]
+  appointments          Appointment[]
+  reviews               Review[]
   prescribedMedications Medication[]
-  recordedVitals   VitalRecord[]
+  recordedVitals        VitalRecord[]
 
   @@index([specialtyId])
   @@index([city, country])
@@ -303,12 +303,12 @@ model Education {
 }
 
 model Certificate {
-  id         String    @id @default(cuid())
-  doctorId   String
-  doctor     Doctor    @relation(fields: [doctorId], references: [id], onDelete: Cascade)
-  name       String
-  issuedBy   String?
-  issuedAt   DateTime?
+  id       String    @id @default(cuid())
+  doctorId String
+  doctor   Doctor    @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  name     String
+  issuedBy String?
+  issuedAt DateTime?
 
   @@index([doctorId])
   @@map("doctor_certificates")
@@ -347,14 +347,14 @@ enum DayOfWeek {
 
 // Créneaux récurrents disponibles pour la prise de RDV sur place
 model Availability {
-  id        String    @id @default(cuid())
-  doctorId  String
-  doctor    Doctor    @relation(fields: [doctorId], references: [id], onDelete: Cascade)
-  dayOfWeek DayOfWeek
-  startTime String // "09:00"
-  endTime   String // "17:00"
-  slotMinutes Int     @default(30)
-  isActive  Boolean   @default(true)
+  id          String    @id @default(cuid())
+  doctorId    String
+  doctor      Doctor    @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  dayOfWeek   DayOfWeek
+  startTime   String // "09:00"
+  endTime     String // "17:00"
+  slotMinutes Int       @default(30)
+  isActive    Boolean   @default(true)
 
   @@unique([doctorId, dayOfWeek, startTime])
   @@index([doctorId])
@@ -411,11 +411,11 @@ model Patient {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  appointments   Appointment[]
-  reviews        Review[]
-  medications    Medication[]
-  vitalRecords   VitalRecord[]
-  activityLogs   ActivityLog[]
+  appointments Appointment[]
+  reviews      Review[]
+  medications  Medication[]
+  vitalRecords VitalRecord[]
+  activityLogs ActivityLog[]
 
   @@map("patients")
 }
@@ -516,9 +516,9 @@ model Review {
 // ============================================================================
 
 model Medication {
-  id       String  @id @default(cuid())
+  id        String  @id @default(cuid())
   patientId String
-  patient  Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patient   Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
 
   // Renseigné quand le médicament est prescrit par un médecin
   prescribedByDoctorId String?
@@ -546,20 +546,20 @@ enum MedicationLogStatus {
 }
 
 model MedicationLog {
-  id           String               @id @default(cuid())
+  id           String              @id @default(cuid())
   medicationId String
-  medication   Medication           @relation(fields: [medicationId], references: [id], onDelete: Cascade)
+  medication   Medication          @relation(fields: [medicationId], references: [id], onDelete: Cascade)
   status       MedicationLogStatus
-  loggedAt     DateTime             @default(now())
+  loggedAt     DateTime            @default(now())
 
   @@index([medicationId, loggedAt])
   @@map("medication_logs")
 }
 
 model VitalRecord {
-  id        String   @id @default(cuid())
+  id        String  @id @default(cuid())
   patientId String
-  patient   Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patient   Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
 
   // Renseigné quand la mesure est relevée par un médecin
   recordedByDoctorId String?
@@ -599,7 +599,7 @@ model Notification {
   type   NotificationType
   title  String
   body   String
-  isRead Boolean @default(false)
+  isRead Boolean          @default(false)
 
   createdAt DateTime @default(now())
 
@@ -616,9 +616,9 @@ enum ActivityType {
 }
 
 model ActivityLog {
-  id        String       @id @default(cuid())
+  id        String  @id @default(cuid())
   patientId String
-  patient   Patient      @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patient   Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
 
   type  ActivityType
   title String

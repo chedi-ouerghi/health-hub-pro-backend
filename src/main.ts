@@ -3,6 +3,8 @@ import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
+import express from 'express';
+import { join } from 'path';
 import * as Sentry from '@sentry/node';
 import { AppModule } from './app.module';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
@@ -41,6 +43,10 @@ async function bootstrap() {
 
   app.use(helmet());
   app.use(cookieParser());
+
+  // Serve uploaded files (images / documents) statically
+  const uploadsDir = join(process.cwd(), process.env.UPLOAD_DIR ?? 'uploads');
+  app.use('/uploads', express.static(uploadsDir));
 
   app.setGlobalPrefix('api/v1');
 

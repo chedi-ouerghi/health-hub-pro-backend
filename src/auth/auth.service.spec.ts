@@ -231,6 +231,32 @@ describe('AuthService', () => {
         expect.objectContaining({ data: expect.objectContaining({ failedLoginCount: 0, lastLoginAt: expect.any(Date) }) }),
       );
     });
+
+    it('tracks an active device session on successful login', async () => {
+      prismaMock.prisma.user.findUnique.mockResolvedValue(user as never);
+      (verifyPassword as jest.Mock).mockResolvedValue(true);
+      prismaMock.prisma.user.update.mockResolvedValue({} as never);
+      prismaMock.prisma.loginAttempt.create.mockResolvedValue({} as never);
+      prismaMock.prisma.refreshToken.create.mockResolvedValue({} as never);
+      prismaMock.prisma.session.create.mockResolvedValue({} as never);
+      prismaMock.prisma.session.updateMany.mockResolvedValue({ count: 1 } as never);
+
+      await service.login({ email: user.email, password: 'ok' }, '1.2.3.4', 'Mozilla/5.0 (iPhone)');
+
+      expect(prismaMock.tx.session.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { userId: 'user-1' }, data: { isCurrent: false } }),
+      );
+      expect(prismaMock.tx.session.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            userId: 'user-1',
+            tokenHash: expect.stringContaining('hashed-'),
+            isCurrent: true,
+            expiresAt: expect.any(Date),
+          }),
+        }),
+      );
+    });
   });
 
   describe('refresh', () => {
@@ -265,6 +291,7 @@ describe('AuthService', () => {
   describe('logout', () => {
     it('revokes a single refresh token when provided', async () => {
       prismaMock.prisma.refreshToken.updateMany.mockResolvedValue({ count: 1 } as never);
+      prismaMock.prisma.session.updateMany.mockResolvedValue({ count: 1 } as never);
       prismaMock.prisma.auditLog.create.mockResolvedValue({} as never);
 
       await service.logout('user-1', 'raw-token');
@@ -272,16 +299,23 @@ describe('AuthService', () => {
       expect(prismaMock.prisma.refreshToken.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: expect.objectContaining({ tokenHash: 'hashed-raw-token' }) }),
       );
+      expect(prismaMock.prisma.session.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ tokenHash: 'hashed-raw-token', revokedAt: null }) }),
+      );
       expect(prismaMock.prisma.auditLog.create).toHaveBeenCalled();
     });
 
     it('revokes all tokens when no token provided', async () => {
       prismaMock.prisma.refreshToken.updateMany.mockResolvedValue({ count: 2 } as never);
+      prismaMock.prisma.session.updateMany.mockResolvedValue({ count: 2 } as never);
       prismaMock.prisma.auditLog.create.mockResolvedValue({} as never);
 
       await service.logout('user-1');
 
       expect(prismaMock.prisma.refreshToken.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ userId: 'user-1', revokedAt: null }) }),
+      );
+      expect(prismaMock.prisma.session.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: expect.objectContaining({ userId: 'user-1', revokedAt: null }) }),
       );
     });

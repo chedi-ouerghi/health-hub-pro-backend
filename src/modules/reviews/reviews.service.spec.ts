@@ -125,4 +125,108 @@ describe('ReviewsService', () => {
       expect(result.meta.total).toBe(1);
     });
   });
+
+  describe('findMine', () => {
+    it('forbids non-patients', async () => {
+      m.prisma.patient.findUnique.mockResolvedValue(null);
+
+      await expect(service.findMine('user-x')).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('returns paginated own reviews', async () => {
+      m.prisma.patient.findUnique.mockResolvedValue({ id: 'pat-1' });
+      m.prisma.review.findMany.mockResolvedValue([{ id: 'r-1', rating: 5 }]);
+      m.prisma.review.count.mockResolvedValue(1);
+
+      const result = await service.findMine('user-1');
+
+      expect(result.reviews).toEqual([{ id: 'r-1', rating: 5 }]);
+      expect(result.meta.total).toBe(1);
+      expect(m.prisma.review.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { patientId: 'pat-1' } }),
+      );
+    });
+  });
+
+  describe('update', () => {
+    it('throws NotFoundException for unknown review', async () => {
+      m.prisma.patient.findUnique.mockResolvedValue({ id: 'pat-1' });
+      m.prisma.review.findUnique.mockResolvedValue(null);
+
+      await expect(service.update('user-1', 'r-x', { rating: 4 })).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+    });
+
+    it('forbids updating another patient review', async () => {
+      m.prisma.patient.findUnique.mockResolvedValue({ id: 'pat-1' });
+      m.prisma.review.findUnique.mockResolvedValue({ id: 'r-1', patientId: 'pat-9', doctorId: 'doc-1' });
+
+      await expect(service.update('user-1', 'r-1', { rating: 4 })).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+    });
+
+    it('rejects empty update payloads', async () => {
+      m.prisma.patient.findUnique.mockResolvedValue({ id: 'pat-1' });
+      m.prisma.review.findUnique.mockResolvedValue({ id: 'r-1', patientId: 'pat-1', doctorId: 'doc-1' });
+
+      await expect(service.update('user-1', 'r-1', {})).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('updates own review and recomputes doctor stats', async () => {
+      m.prisma.patient.findUnique.mockResolvedValue({ id: 'pat-1' });
+      m.prisma.review.findUnique.mockResolvedValue({ id: 'r-1', patientId: 'pat-1', doctorId: 'doc-1' });
+      m.tx.review.update.mockResolvedValue({ id: 'r-1', rating: 4 });
+      m.tx.review.findMany.mockResolvedValue([{ rating: 5 }, { rating: 4 }]);
+      m.tx.doctor.update.mockResolvedValue({});
+      m.tx.auditLog.create.mockResolvedValue({});
+
+      const result = await service.update('user-1', 'r-1', { rating: 4 });
+
+      expect(result.rating).toBe(4);
+      expect(m.tx.doctor.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'doc-1' },
+          data: expect.objectContaining({ ratingAverage: 4.5, reviewCount: 2 }),
+        }),
+      );
+    });
+  });
+
+  describe('remove', () => {
+    it('throws NotFoundException for unknown review', async () => {
+      m.prisma.patient.findUnique.mockResolvedValue({ id: 'pat-1' });
+      m.prisma.review.findUnique.mockResolvedValue(null);
+
+      await expect(service.remove('user-1', 'r-x')).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('forbids deleting another patient review', async () => {
+      m.prisma.patient.findUnique.mockResolvedValue({ id: 'pat-1' });
+      m.prisma.review.findUnique.mockResolvedValue({ id: 'r-1', patientId: 'pat-9', doctorId: 'doc-1' });
+
+      await expect(service.remove('user-1', 'r-1')).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('deletes own review, recomputes stats (empty → zeros) and audits', async () => {
+      m.prisma.patient.findUnique.mockResolvedValue({ id: 'pat-1' });
+      m.prisma.review.findUnique.mockResolvedValue({ id: 'r-1', patientId: 'pat-1', doctorId: 'doc-1' });
+      m.tx.review.delete.mockResolvedValue({});
+      m.tx.review.findMany.mockResolvedValue([]);
+      m.tx.doctor.update.mockResolvedValue({});
+      m.tx.auditLog.create.mockResolvedValue({});
+
+      const result = await service.remove('user-1', 'r-1');
+
+      expect(result.message).toContain('deleted');
+      expect(m.tx.doctor.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'doc-1' },
+          data: expect.objectContaining({ ratingAverage: 0, reviewCount: 0, recommendationRate: 0 }),
+        }),
+      );
+      expect(m.tx.review.delete).toHaveBeenCalledWith({ where: { id: 'r-1' } });
+    });
+  });
 });

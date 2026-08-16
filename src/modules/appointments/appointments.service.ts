@@ -6,7 +6,7 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { CreateAppointmentDto, UpdateAppointmentStatusDto, FilterAppointmentsDto } from './dto/appointments.dto';
+import { CreateAppointmentDto, UpdateAppointmentStatusDto, RescheduleAppointmentDto, FilterAppointmentsDto } from './dto/appointments.dto';
 import { AppointmentStatus, NotificationType } from '@prisma/client';
 import { isWithinAvailability, PRISMA_DAY_TO_JS } from '../../common/utils/club-time.util';
 import { PaymentService } from '../../common/services/payment.service';
@@ -345,6 +345,128 @@ export class AppointmentsService {
     });
 
     return updated;
+  }
+
+  // ── Reschedule ───────────────────────────────────────────────────────────────
+
+  async reschedule(userId: string, role: string, id: string, dto: RescheduleAppointmentDto) {
+    const appointment = await this.prisma.appointment.findUnique({
+      where: { id },
+      include: {
+        patient: { select: { id: true, userId: true, firstName: true, lastName: true } },
+        doctor: {
+          select: {
+            id: true,
+            userId: true,
+            firstName: true,
+            lastName: true,
+            clinicName: true,
+            addressLine: true,
+            city: true,
+            country: true,
+            consultationPrice: true,
+            currency: true,
+            availabilities: { where: { isActive: true } },
+          },
+        },
+      },
+    });
+
+    if (!appointment) throw new NotFoundException('Appointment not found');
+
+    // Patient owner or the doctor of the appointment
+    const isPatient = appointment.patient.userId === userId;
+    const isDoctor = appointment.doctor.userId === userId;
+    if (!isPatient && !isDoctor) throw new ForbiddenException('You do not have access to this appointment');
+    if (role !== 'PATIENT' && role !== 'DOCTOR') throw new ForbiddenException('Only patients and doctors can reschedule');
+
+    if (appointment.status !== AppointmentStatus.UPCOMING) {
+      throw new BadRequestException('Only UPCOMING appointments can be rescheduled');
+    }
+
+    const scheduledAt = new Date(dto.scheduledAt);
+    if (isNaN(scheduledAt.getTime())) throw new BadRequestException('Invalid scheduledAt datetime');
+    if (scheduledAt <= new Date()) throw new BadRequestException('Appointment must be in the future');
+
+    // Slot must be within an active availability window
+    const jsDayOfWeek = scheduledAt.getDay();
+    const matchingAvail = appointment.doctor.availabilities.find((avail) =>
+      isWithinAvailability(
+        scheduledAt,
+        PRISMA_DAY_TO_JS[avail.dayOfWeek],
+        avail.startTime,
+        avail.endTime,
+        avail.slotMinutes,
+      ),
+    );
+    if (!matchingAvail) {
+      throw new BadRequestException("Requested time is not within doctor's available slots");
+    }
+
+    // Explicit conflict check (schema @@unique([doctorId, scheduledAt]) is the backstop → P2002)
+    const clash = await this.prisma.appointment.findFirst({
+      where: { doctorId: appointment.doctor.id, scheduledAt, id: { not: id } },
+      select: { id: true },
+    });
+    if (clash) throw new ConflictException('This time slot is already booked');
+
+    try {
+      const updated = await this.prisma.$transaction(async (tx) => {
+        const appt = await tx.appointment.update({
+          where: { id },
+          data: {
+            scheduledAt,
+            status: AppointmentStatus.RESCHEDULED,
+            durationMinutes: matchingAvail.slotMinutes,
+            // clinicAddressSnapshot deliberately unchanged (keeps the original snapshot)
+          },
+          select: {
+            id: true,
+            scheduledAt: true,
+            durationMinutes: true,
+            clinicAddressSnapshot: true,
+            status: true,
+            price: true,
+            currency: true,
+            notes: true,
+            updatedAt: true,
+            doctor: { select: { id: true, firstName: true, lastName: true } },
+            patient: { select: { id: true, firstName: true, lastName: true } },
+          },
+        });
+
+        // Notify the OTHER party
+        const notifyUserId = isPatient ? appointment.doctor.userId : appointment.patient.userId;
+        const formatted = `${scheduledAt.toLocaleDateString('fr-FR')} à ${scheduledAt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`;
+        await tx.notification.create({
+          data: {
+            userId: notifyUserId,
+            type: NotificationType.SYSTEM,
+            title: 'Rendez-vous reprogrammé',
+            body: `Le rendez-vous a été déplacé au ${formatted}${isPatient ? ' par le patient' : ' par le médecin'}.`,
+          },
+        });
+
+        await tx.auditLog.create({
+          data: {
+            userId,
+            action: 'APPOINTMENT_RESCHEDULED',
+            entityType: 'Appointment',
+            entityId: id,
+            metadata: { from: appointment.scheduledAt.toISOString(), to: scheduledAt.toISOString() },
+          },
+        });
+
+        return appt;
+      });
+
+      return updated;
+    } catch (err: any) {
+      if (err?.code === 'P2002') {
+        throw new ConflictException('This time slot is already booked');
+      }
+      throw err;
+    }
   }
 
   // ── Cancel by patient ─────────────────────────────────────────────────────────

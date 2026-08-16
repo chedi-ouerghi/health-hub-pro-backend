@@ -5,6 +5,7 @@ import {
   Patch,
   Body,
   Param,
+  Query,
   UseGuards,
 } from "@nestjs/common";
 import {
@@ -18,6 +19,7 @@ import { MedicationsService } from "../medications/medications.service";
 import { VitalsService } from "../vitals/vitals.service";
 import { CreateMedicationDto } from "../medications/dto/medications.dto";
 import { CreateVitalRecordDto } from "../vitals/dto/vitals.dto";
+import { CreateActivityLogDto, FilterActivityLogsDto } from "./dto/patients.dto";
 import { UpdatePatientProfileDto } from "../users/dto/update-profile.dto";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { Roles } from "../../common/decorators/roles.decorator";
@@ -128,5 +130,48 @@ export class PatientsController {
     @Body() dto: CreateVitalRecordDto,
   ) {
     return this.vitalsService.createForPatient(doctorUserId, patientId, dto);
+  }
+
+  // ── Patient activity logs (doctor/admin side) ────────────────────────────────
+
+  @UseGuards(RolesGuard, DoctorPatientAccessGuard)
+  @Roles("DOCTOR", "ADMIN", "SUPER_ADMIN")
+  @Get(":id/activity-logs")
+  @ApiOperation({
+    summary:
+      "List a patient's activity logs (Doctor: own patients only; Admin: any)",
+  })
+  @ApiParam({ name: "id" })
+  listPatientActivityLogs(
+    @Param("id", ParseCuidPipe) patientId: string,
+    @Query() filter: FilterActivityLogsDto,
+  ) {
+    return this.patientsService.getPatientActivityLogs(
+      patientId,
+      filter.page,
+      filter.limit,
+    );
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles("DOCTOR", "ADMIN", "SUPER_ADMIN")
+  @Post(":id/activity-logs")
+  @ApiOperation({
+    summary:
+      "Internal: create an activity log entry for a patient (treating doctor, admin or system)",
+  })
+  @ApiParam({ name: "id" })
+  createPatientActivityLog(
+    @CurrentUser("id") requesterUserId: string,
+    @CurrentUser("role") requesterRole: string,
+    @Param("id", ParseCuidPipe) patientId: string,
+    @Body() dto: CreateActivityLogDto,
+  ) {
+    return this.patientsService.createPatientActivityLog(
+      requesterUserId,
+      requesterRole,
+      patientId,
+      dto,
+    );
   }
 }

@@ -352,4 +352,119 @@ describe('AppointmentsService', () => {
       );
     });
   });
+
+  describe('reschedule', () => {
+    const appointment = {
+      id: 'appt-1',
+      status: AppointmentStatus.UPCOMING,
+      scheduledAt: nextMondayAt9(),
+      patient: { id: 'pat-1', userId: 'user-1', firstName: 'John', lastName: 'Doe' },
+      doctor: {
+        id: 'doc-1',
+        userId: 'doc-user',
+        firstName: 'A',
+        lastName: 'B',
+        clinicName: 'Clinic',
+        addressLine: '1 st',
+        city: 'Paris',
+        country: 'FR',
+        consultationPrice: 100,
+        currency: 'EUR',
+        availabilities: [
+          { dayOfWeek: 'MONDAY', startTime: '09:00', endTime: '12:00', slotMinutes: 30, isActive: true },
+        ],
+      },
+    };
+
+    const newMondayAt9 = new Date(nextMondayAt9().getTime() + 7 * 24 * 60 * 60 * 1000);
+
+    it('throws NotFoundException for unknown appointment', async () => {
+      m.prisma.appointment.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.reschedule('user-1', 'PATIENT', 'appt-x', { scheduledAt: newMondayAt9.toISOString() }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('forbids users who are neither the patient nor the doctor', async () => {
+      m.prisma.appointment.findUnique.mockResolvedValue(appointment);
+
+      await expect(
+        service.reschedule('intruder', 'PATIENT', 'appt-1', { scheduledAt: newMondayAt9.toISOString() }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('allows either the patient owner or the doctor of the appointment', async () => {
+      m.prisma.appointment.findUnique.mockResolvedValue(appointment);
+      m.prisma.appointment.findFirst.mockResolvedValue(null);
+      m.tx.appointment.update.mockResolvedValue({ id: 'appt-1', status: AppointmentStatus.RESCHEDULED });
+      m.tx.notification.create.mockResolvedValue({});
+      m.tx.auditLog.create.mockResolvedValue({});
+
+      for (const [userId, role] of [['user-1', 'PATIENT'], ['doc-user', 'DOCTOR']] as const) {
+        const result = await service.reschedule(userId, role, 'appt-1', { scheduledAt: newMondayAt9.toISOString() });
+        expect(result.status).toBe(AppointmentStatus.RESCHEDULED);
+      }
+    });
+
+    it('rejects non-UPCOMING appointments', async () => {
+      m.prisma.appointment.findUnique.mockResolvedValue({ ...appointment, status: AppointmentStatus.COMPLETED });
+
+      await expect(
+        service.reschedule('user-1', 'PATIENT', 'appt-1', { scheduledAt: newMondayAt9.toISOString() }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('rejects past dates', async () => {
+      m.prisma.appointment.findUnique.mockResolvedValue(appointment);
+
+      await expect(
+        service.reschedule('user-1', 'PATIENT', 'appt-1', { scheduledAt: '2020-01-01T09:00:00.000Z' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('rejects a slot outside the doctor availability', async () => {
+      m.prisma.appointment.findUnique.mockResolvedValue(appointment);
+
+      // Saturday 09:00 — outside the MONDAY-only availability
+      const saturday = new Date(nextMondayAt9().getTime() + 5 * 24 * 60 * 60 * 1000);
+
+      await expect(
+        service.reschedule('user-1', 'PATIENT', 'appt-1', { scheduledAt: saturday.toISOString() }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(m.prisma.appointment.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('rejects a slot already taken by another appointment', async () => {
+      m.prisma.appointment.findUnique.mockResolvedValue(appointment);
+      m.prisma.appointment.findFirst.mockResolvedValue({ id: 'appt-other' });
+
+      await expect(
+        service.reschedule('user-1', 'PATIENT', 'appt-1', { scheduledAt: newMondayAt9.toISOString() }),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('updates scheduledAt, sets RESCHEDULED, notifies the other party and audits', async () => {
+      m.prisma.appointment.findUnique.mockResolvedValue(appointment);
+      m.prisma.appointment.findFirst.mockResolvedValue(null);
+      m.tx.appointment.update.mockResolvedValue({ id: 'appt-1', status: AppointmentStatus.RESCHEDULED });
+      m.tx.notification.create.mockResolvedValue({});
+      m.tx.auditLog.create.mockResolvedValue({});
+
+      await service.reschedule('user-1', 'PATIENT', 'appt-1', { scheduledAt: newMondayAt9.toISOString() });
+
+      const updateCall = m.tx.appointment.update.mock.calls[0][0];
+      expect(updateCall.data.scheduledAt).toEqual(newMondayAt9);
+      expect(updateCall.data.status).toBe(AppointmentStatus.RESCHEDULED);
+      // snapshot never touched
+      expect(updateCall.data.clinicAddressSnapshot).toBeUndefined();
+      // doctor is notified when the patient reschedules
+      expect(m.tx.notification.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ userId: 'doc-user' }) }),
+      );
+      expect(m.tx.auditLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ action: 'APPOINTMENT_RESCHEDULED' }) }),
+      );
+    });
+  });
 });

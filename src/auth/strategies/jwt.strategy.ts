@@ -40,6 +40,12 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
     if (user.status === 'DEACTIVATED') throw new UnauthorizedException('Account deactivated');
 
     // Attach minimal user info to request.user
-    return { id: user.id, email: user.email, role: user.role, status: user.status };
+    return {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      status: user.status,
+      sessionId: payload.sessionId,
+    };
   }
 }
