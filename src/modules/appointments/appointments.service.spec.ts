@@ -49,7 +49,7 @@ describe('AppointmentsService', () => {
       m.prisma.patient.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.create('user-1', { doctorId: 'doc-1', scheduledAt: nextMondayAt9().toISOString() }),
+        service.create('user-1', { doctorId: 'doc-1', scheduledAt: nextMondayAt9().toISOString(), cardNumber: '4242424242424242', expMonth: 12, expYear: 2030, cvc: '123' }),
       ).rejects.toBeInstanceOf(ForbiddenException);
     });
 
@@ -58,7 +58,7 @@ describe('AppointmentsService', () => {
       m.prisma.doctor.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.create('user-1', { doctorId: 'doc-x', scheduledAt: nextMondayAt9().toISOString() }),
+        service.create('user-1', { doctorId: 'doc-x', scheduledAt: nextMondayAt9().toISOString(), cardNumber: '4242424242424242', expMonth: 12, expYear: 2030, cvc: '123' }),
       ).rejects.toBeInstanceOf(NotFoundException);
     });
 
@@ -67,7 +67,7 @@ describe('AppointmentsService', () => {
       m.prisma.doctor.findUnique.mockResolvedValue({ ...doctor, isAcceptingNewPatients: false });
 
       await expect(
-        service.create('user-1', { doctorId: 'doc-1', scheduledAt: nextMondayAt9().toISOString() }),
+        service.create('user-1', { doctorId: 'doc-1', scheduledAt: nextMondayAt9().toISOString(), cardNumber: '4242424242424242', expMonth: 12, expYear: 2030, cvc: '123' }),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
@@ -76,7 +76,7 @@ describe('AppointmentsService', () => {
       m.prisma.doctor.findUnique.mockResolvedValue(doctor);
 
       await expect(
-        service.create('user-1', { doctorId: 'doc-1', scheduledAt: '2020-01-01T09:00:00.000Z' }),
+        service.create('user-1', { doctorId: 'doc-1', scheduledAt: '2020-01-01T09:00:00.000Z', cardNumber: '4242424242424242', expMonth: 12, expYear: 2030, cvc: '123' }),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
@@ -87,7 +87,7 @@ describe('AppointmentsService', () => {
       monday.setHours(12, 30, 0, 0); // after 12:00 end
 
       await expect(
-        service.create('user-1', { doctorId: 'doc-1', scheduledAt: monday.toISOString() }),
+        service.create('user-1', { doctorId: 'doc-1', scheduledAt: monday.toISOString(), cardNumber: '4242424242424242', expMonth: 12, expYear: 2030, cvc: '123' }),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
@@ -98,11 +98,17 @@ describe('AppointmentsService', () => {
       m.tx.appointment.create.mockResolvedValue(appt);
       m.tx.notification.create.mockResolvedValue({});
       m.tx.auditLog.create.mockResolvedValue({});
+      m.tx.invoice.create.mockResolvedValue({});
+      m.tx.invoice.count.mockResolvedValue(0);
 
       const result = await service.create('user-1', {
         doctorId: 'doc-1',
         scheduledAt: nextMondayAt9().toISOString(),
         notes: 'hi',
+        cardNumber: '4242424242424242',
+        expMonth: 12,
+        expYear: 2030,
+        cvc: '123',
       });
 
       expect(result.id).toBe('appt-1');
@@ -117,6 +123,7 @@ describe('AppointmentsService', () => {
           }),
         }),
       );
+      expect(m.tx.invoice.create).toHaveBeenCalled();
       expect(m.tx.notification.create).toHaveBeenCalledTimes(2);
     });
 
@@ -130,7 +137,7 @@ describe('AppointmentsService', () => {
       });
 
       await expect(
-        service.create('user-1', { doctorId: 'doc-1', scheduledAt: nextMondayAt9().toISOString() }),
+        service.create('user-1', { doctorId: 'doc-1', scheduledAt: nextMondayAt9().toISOString(), cardNumber: '4242424242424242', expMonth: 12, expYear: 2030, cvc: '123' }),
       ).rejects.toBeInstanceOf(ConflictException);
     });
   });

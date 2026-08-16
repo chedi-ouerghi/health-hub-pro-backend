@@ -1,12 +1,10 @@
 import {
   IsString,
-  IsOptional,
-  IsDateString,
-  IsEnum,
+  IsOptional, IsEnum,
   IsInt,
   Min,
   Max,
-  IsISO8601,
+  IsISO8601
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
@@ -25,6 +23,29 @@ export class CreateAppointmentDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @ApiProperty({ example: '4242424242424242', description: 'Card number for static payment (dev only)' })
+  @IsString()
+  cardNumber: string;
+
+  @ApiProperty({ example: 12 })
+  @IsInt()
+  @Type(() => Number)
+  expMonth: number;
+
+  @ApiProperty({ example: 2030 })
+  @IsInt()
+  @Type(() => Number)
+  expYear: number;
+
+  @ApiProperty({ example: '123' })
+  @IsString()
+  cvc: string;
+
+  @ApiPropertyOptional({ example: 'John Doe' })
+  @IsOptional()
+  @IsString()
+  cardHolderName?: string;
 }
 
 export class UpdateAppointmentStatusDto {

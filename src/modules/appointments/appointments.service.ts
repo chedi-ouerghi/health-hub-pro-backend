@@ -9,6 +9,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { CreateAppointmentDto, UpdateAppointmentStatusDto, FilterAppointmentsDto } from './dto/appointments.dto';
 import { AppointmentStatus, NotificationType } from '@prisma/client';
 import { isWithinAvailability, PRISMA_DAY_TO_JS } from '../../common/utils/club-time.util';
+import { PaymentService } from '../../common/services/payment.service';
 
 // How many minutes before the appointment a patient can still cancel
 const CANCELLATION_CUTOFF_MINUTES = 60;
@@ -20,7 +21,7 @@ const ALLOWED_TRANSITIONS: Record<string, AppointmentStatus[]> = {
 
 @Injectable()
 export class AppointmentsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) { }
 
   // ── Book an appointment ───────────────────────────────────────────────────────
 
@@ -73,7 +74,22 @@ export class AppointmentsService {
     // 5. Build clinic address snapshot
     const clinicAddressSnapshot = `${doctor.clinicName}, ${doctor.addressLine}, ${doctor.city}, ${doctor.country}`;
 
-    // 6. Create in a transaction (unique constraint on [doctorId, scheduledAt] handles double-booking)
+    // 6. Process payment (simulated). Require card info in DTO for confirmation.
+    const paymentSvc = new PaymentService();
+    const card = {
+      number: (dto as any).cardNumber,
+      expMonth: (dto as any).expMonth,
+      expYear: (dto as any).expYear,
+      cvc: (dto as any).cvc,
+      holderName: (dto as any).cardHolderName,
+    };
+
+    const paymentResult = await paymentSvc.processCardPayment(String(doctor.consultationPrice), doctor.currency, card as any);
+    if (!paymentResult.success) {
+      throw new BadRequestException(`Payment failed: ${paymentResult.reason}`);
+    }
+
+    // 7. Create appointment + invoice in a transaction
     try {
       const appointment = await this.prisma.$transaction(async (tx) => {
         const appt = await tx.appointment.create({
@@ -99,6 +115,21 @@ export class AppointmentsService {
             createdAt: true,
             doctor: { select: { id: true, firstName: true, lastName: true } },
             patient: { select: { id: true, firstName: true, lastName: true } },
+          },
+        });
+
+        // Create invoice (paid)
+        const count = await tx.invoice.count();
+        const invoiceNumber = `INV-${String(count + 1).padStart(6, '0')}`;
+        await tx.invoice.create({
+          data: {
+            appointmentId: appt.id,
+            invoiceNumber,
+            amount: doctor.consultationPrice,
+            currency: doctor.currency,
+            status: 'PAID',
+            paymentMethod: 'card',
+            paidAt: paymentResult.paidAt as Date,
           },
         });
 
@@ -129,7 +160,7 @@ export class AppointmentsService {
             action: 'APPOINTMENT_CREATED',
             entityType: 'Appointment',
             entityId: appt.id,
-            metadata: { doctorId: doctor.id, scheduledAt: dto.scheduledAt },
+            metadata: { doctorId: doctor.id, scheduledAt: dto.scheduledAt, paymentTx: paymentResult.transactionId },
           },
         });
 
