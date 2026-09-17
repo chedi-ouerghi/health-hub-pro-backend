@@ -49,6 +49,7 @@ Stripe, Resend, Turnstile, Sentry, and two-factor encryption settings are option
 | `npm run prisma:generate` | Generate the Prisma client |
 | `npm run prisma:migrate:dev` | Create/apply a local migration |
 | `npm run prisma:migrate` | Apply committed migrations |
+| `npm run prisma:bootstrap-admin` | Create/update only the configured admin account |
 | `npm run prisma:studio` | Open Prisma Studio |
 | `npm run test:unit` | Run unit tests |
 | `npm run test:e2e` | Run end-to-end tests with a test database |
@@ -83,6 +84,16 @@ npm run prisma:generate
 ```
 
 Production environments should apply committed migrations with `npm run prisma:migrate`. Do not edit production data or migration history manually.
+
+## Production admin bootstrap
+
+Use the dedicated bootstrap command to create or update only an administrator. It reads `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ADMIN_FIRST_NAME`, and `ADMIN_LAST_NAME` from the environment and does not run the demo seed or delete application data:
+
+```bash
+npm run prisma:bootstrap-admin
+```
+
+The full `npm run prisma:seed` command is demo-only and destructive: it clears dynamic records before inserting sample doctors, patients, appointments, invoices, and health data. Never run it against a production database containing real data.
 
 ## Security notes
 

@@ -23,6 +23,7 @@
     "prisma:migrate": "prisma migrate deploy",
     "prisma:migrate:dev": "prisma migrate dev",
     "prisma:seed": "ts-node prisma/seed.ts",
+    "prisma:bootstrap-admin": "ts-node prisma/bootstrap-admin.ts",
     "prisma:studio": "prisma studio",
     "prisma:test:reset": "DATABASE_URL=$DATABASE_URL_TEST prisma migrate reset --force && npm run prisma:seed",
     "docker:test:up": "docker-compose -f docker-compose.test.yml up -d",
