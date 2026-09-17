@@ -1,25 +1,24 @@
 import {
-  Injectable,
-  ConflictException,
-  UnauthorizedException,
   BadRequestException,
-  NotFoundException,
+  ConflictException,
   ForbiddenException,
+  Injectable,
+  UnauthorizedException
 } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import { JwtService } from '@nestjs/jwt';
+import { DeviceType, UserRole } from '@prisma/client';
+import { randomBytes } from 'crypto';
+import { hashPassword, hashToken, verifyPassword } from '../common/utils/hash.utils';
 import { PrismaService } from '../prisma/prisma.service';
-import { hashPassword, verifyPassword, hashToken } from '../common/utils/hash.utils';
 import {
-  RegisterDto,
+  ForgotPasswordDto,
   LoginDto,
   RefreshTokenDto,
-  VerifyEmailDto,
-  ForgotPasswordDto,
+  RegisterDto,
   ResetPasswordDto,
+  VerifyEmailDto,
 } from './dto/auth.dto';
-import { UserRole, DeviceType } from '@prisma/client';
-import { randomBytes } from 'crypto';
 
 const MAX_FAILED_LOGINS = 5;
 const LOCK_DURATION_MINUTES = 15;

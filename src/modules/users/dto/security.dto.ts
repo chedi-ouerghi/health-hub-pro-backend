@@ -1,6 +1,6 @@
-import { IsString, MinLength, Matches, IsOptional, IsInt, Min, Max } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
+import { IsInt, IsOptional, IsString, Matches, Max, Min, MinLength } from 'class-validator';
 
 // ── Change password ───────────────────────────────────────────────────────────
 
@@ -35,20 +35,19 @@ export class DisableTwoFactorDto {
   code: string;
 }
 
-// ── Phone verification ────────────────────────────────────────────────────────
+// ── Email verification ────────────────────────────────────────────────────────
 
-export class RequestPhoneVerificationDto {
-  @ApiPropertyOptional({ example: '+33612345678', description: 'Defaults to the phone already on the account' })
+export class RequestEmailVerificationDto {
+  @ApiPropertyOptional({ example: 'patient@example.com', description: 'Defaults to the email on the account' })
   @IsOptional()
   @IsString()
-  @Matches(/^\+?[0-9]{8,15}$/, { message: 'phone must be a valid phone number' })
-  phone?: string;
+  email?: string;
 }
 
-export class ConfirmPhoneVerificationDto {
+export class ConfirmEmailVerificationDto {
   @ApiProperty({ example: '123456' })
   @IsString()
-  @Matches(/^\d{6}$/, { message: 'code must be a 6-digit SMS code' })
+  @Matches(/^\d{6}$/, { message: 'code must be a 6-digit email verification code' })
   code: string;
 }
 

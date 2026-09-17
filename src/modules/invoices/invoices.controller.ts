@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Param, Body, Query, Res, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Param, Body, Query, Res, UseGuards, Req, Headers, BadRequestException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiParam, ApiProduces } from '@nestjs/swagger';
 import { Response } from 'express';
 import { InvoicesService } from './invoices.service';
@@ -7,12 +7,26 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { ParseCuidPipe } from '../../common/pipes/parse-uuid.pipe';
+import { PaymentService } from '../../common/services/payment.service';
+import { Public } from '../../common/decorators/public.decorator';
+import { Request } from 'express';
 
 @ApiTags('Invoices')
 @ApiBearerAuth()
 @Controller('invoices')
 export class InvoicesController {
-  constructor(private readonly invoicesService: InvoicesService) {}
+  constructor(
+    private readonly invoicesService: InvoicesService,
+    private readonly paymentService: PaymentService,
+  ) {}
+
+  @Public()
+  @Post('webhook')
+  @ApiOperation({ summary: 'Stripe payment webhook' })
+  webhook(@Req() request: Request & { rawBody?: Buffer }, @Headers('stripe-signature') signature?: string) {
+    if (!request.rawBody || !signature) throw new BadRequestException('Stripe signature is required');
+    return this.paymentService.handleWebhook(request.rawBody, signature);
+  }
 
   // ── Internal creation (admin / system) ───────────────────────────────────────
 

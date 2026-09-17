@@ -24,28 +24,6 @@ export class CreateAppointmentDto {
   @IsString()
   notes?: string;
 
-  @ApiProperty({ example: '4242424242424242', description: 'Card number for static payment (dev only)' })
-  @IsString()
-  cardNumber: string;
-
-  @ApiProperty({ example: 12 })
-  @IsInt()
-  @Type(() => Number)
-  expMonth: number;
-
-  @ApiProperty({ example: 2030 })
-  @IsInt()
-  @Type(() => Number)
-  expYear: number;
-
-  @ApiProperty({ example: '123' })
-  @IsString()
-  cvc: string;
-
-  @ApiPropertyOptional({ example: 'John Doe' })
-  @IsOptional()
-  @IsString()
-  cardHolderName?: string;
 }
 
 export class UpdateAppointmentStatusDto {

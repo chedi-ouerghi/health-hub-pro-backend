@@ -54,6 +54,8 @@ model User {
 
   emailVerifiedAt DateTime?
   phoneVerifiedAt DateTime?
+  emailVerificationCode      String?
+  emailVerificationExpiresAt DateTime?
 
   twoFactorEnabled Boolean @default(false)
   twoFactorSecret  String? // chiffré au niveau applicatif
@@ -483,6 +485,7 @@ model Invoice {
   currency      String        @default("USD")
   status        InvoiceStatus @default(PENDING)
   paymentMethod String?
+  stripePaymentIntentId String? @unique
   paidAt        DateTime?
   createdAt     DateTime      @default(now())
 

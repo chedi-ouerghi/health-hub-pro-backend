@@ -1,13 +1,13 @@
 import {
-  ForbiddenException,
-  NotFoundException,
-  BadRequestException,
-  ConflictException,
+    BadRequestException,
+    ConflictException,
+    ForbiddenException,
+    NotFoundException,
 } from '@nestjs/common';
-import { UsersService } from './users.service';
-import { SmsService } from '../../common/services/sms.service';
-import { createPrismaMock, PrismaMock } from '../../test/prisma-mock';
+import { EmailVerificationService } from '../../common/services/email-verification.service';
 import { encryptSecret } from '../../common/utils/crypto.utils';
+import { createPrismaMock, PrismaMock } from '../../test/prisma-mock';
+import { UsersService } from './users.service';
 
 jest.mock('../../common/utils/hash.utils', () => ({
   hashPassword: jest.fn(async (p: string) => `hashed-${p}`),
@@ -20,20 +20,20 @@ jest.mock('otplib', () => ({
   verify: jest.fn(async () => ({ valid: true })),
 }));
 // qrcode is CJS-compatible, loaded for real
-import { hashPassword, verifyPassword } from '../../common/utils/hash.utils';
 import { verify as verifyTotp } from 'otplib';
+import { hashPassword, verifyPassword } from '../../common/utils/hash.utils';
 
 const ENCRYPTION_KEY = 'a'.repeat(64);
 
 describe('UsersService', () => {
   let service: UsersService;
   let m: PrismaMock;
-  let sms: { requestCode: jest.Mock; verifyCode: jest.Mock };
+  let emailVerification: { requestCode: jest.Mock; verifyCode: jest.Mock };
   let config: { get: jest.Mock };
 
   beforeEach(() => {
     m = createPrismaMock();
-    sms = { requestCode: jest.fn(), verifyCode: jest.fn() };
+    emailVerification = { requestCode: jest.fn(), verifyCode: jest.fn() };
     config = {
       get: jest.fn((key: string) => {
         const map: Record<string, unknown> = {
@@ -44,7 +44,7 @@ describe('UsersService', () => {
         return map[key];
       }),
     };
-    service = new UsersService(m.prisma as any, sms as unknown as SmsService, config as any);
+    service = new UsersService(m.prisma as any, emailVerification as unknown as EmailVerificationService, config as any);
     jest.clearAllMocks();
   });
 
@@ -355,71 +355,56 @@ describe('UsersService', () => {
     });
   });
 
-  describe('requestPhoneVerification', () => {
-    it('rejects when no phone is available', async () => {
-      m.prisma.user.findUnique.mockResolvedValue({ id: 'user-1', phone: null } as never);
+  describe('requestEmailVerification', () => {
+    it('rejects when the user is missing', async () => {
+      m.prisma.user.findUnique.mockResolvedValue(null);
 
-      await expect(service.requestPhoneVerification('user-1', {})).rejects.toBeInstanceOf(
-        BadRequestException,
-      );
-      expect(sms.requestCode).not.toHaveBeenCalled();
+      await expect(service.requestEmailVerification('user-1', {})).rejects.toBeInstanceOf(NotFoundException);
+      expect(emailVerification.requestCode).not.toHaveBeenCalled();
     });
 
-    it('merges a new phone onto the account, sends a code and audits', async () => {
-      const phone = '+33612345678';
-      m.prisma.user.findUnique.mockResolvedValue({ id: 'user-1', phone: null } as never);
-      m.prisma.user.update.mockResolvedValue({} as never);
-      sms.requestCode.mockResolvedValue('123456');
+    it('sends an email code and audits', async () => {
+      const email = 'patient@example.com';
+      m.prisma.user.findUnique.mockResolvedValue({ id: 'user-1', email } as never);
+      emailVerification.requestCode.mockResolvedValue('123456');
       m.prisma.auditLog.create.mockResolvedValue({} as never);
 
-      const result = await service.requestPhoneVerification('user-1', { phone });
+      const result = await service.requestEmailVerification('user-1', {});
 
-      expect(m.prisma.user.update).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ phone }) }),
-      );
-      expect(sms.requestCode).toHaveBeenCalledWith('user-1', phone);
+      expect(emailVerification.requestCode).toHaveBeenCalledWith('user-1', email);
       expect(result.devCode).toBe('123456'); // dev convenience
       expect(m.prisma.auditLog.create).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ action: 'PHONE_VERIFICATION_REQUESTED' }) }),
+        expect.objectContaining({ data: expect.objectContaining({ action: 'EMAIL_VERIFICATION_CODE_REQUESTED' }) }),
       );
-    });
-
-    it('throws ConflictException when the new phone is already used', async () => {
-      m.prisma.user.findUnique.mockResolvedValue({ id: 'user-1', phone: '+3300000000' } as never);
-      m.prisma.user.update.mockRejectedValue({ code: 'P2002' });
-
-      await expect(
-        service.requestPhoneVerification('user-1', { phone: '+3366666666' }),
-      ).rejects.toBeInstanceOf(ConflictException);
     });
   });
 
-  describe('confirmPhoneVerification', () => {
+  describe('confirmEmailVerification', () => {
     it('rejects an invalid code', async () => {
       m.prisma.user.findUnique.mockResolvedValue({ id: 'user-1' } as never);
-      sms.verifyCode.mockReturnValue(false);
+      emailVerification.verifyCode.mockResolvedValue(false);
 
-      await expect(service.confirmPhoneVerification('user-1', { code: '000000' })).rejects.toBeInstanceOf(
+      await expect(service.confirmEmailVerification('user-1', { code: '000000' })).rejects.toBeInstanceOf(
         BadRequestException,
       );
       expect(m.prisma.user.update).not.toHaveBeenCalled();
     });
 
-    it('marks phoneVerifiedAt and audits on success', async () => {
+    it('marks emailVerifiedAt and audits on success', async () => {
       m.prisma.user.findUnique.mockResolvedValue({ id: 'user-1' } as never);
-      sms.verifyCode.mockReturnValue(true);
+      emailVerification.verifyCode.mockResolvedValue(true);
       m.prisma.user.update.mockResolvedValue({} as never);
       m.prisma.notification.create.mockResolvedValue({} as never);
       m.prisma.auditLog.create.mockResolvedValue({} as never);
 
-      const result = await service.confirmPhoneVerification('user-1', { code: '123456' });
+      const result = await service.confirmEmailVerification('user-1', { code: '123456' });
 
       expect(result.message).toContain('verified');
       expect(m.prisma.user.update).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ phoneVerifiedAt: expect.any(Date) }) }),
+        expect.objectContaining({ data: expect.objectContaining({ emailVerifiedAt: expect.any(Date) }) }),
       );
       expect(m.prisma.auditLog.create).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ action: 'PHONE_VERIFIED' }) }),
+        expect.objectContaining({ data: expect.objectContaining({ action: 'EMAIL_VERIFIED' }) }),
       );
     });
   });

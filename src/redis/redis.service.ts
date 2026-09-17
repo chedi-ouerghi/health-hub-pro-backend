@@ -7,21 +7,27 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   public client: Redis | null = null;
 
   onModuleInit() {
-    if (process.env.REDIS_URL) {
-      this.client = new Redis(process.env.REDIS_URL, {
+    const redisUrl = process.env.REDIS_URL?.trim();
+
+    if (redisUrl) {
+      const protocol = new URL(redisUrl).protocol;
+      if (protocol !== 'redis:' && protocol !== 'rediss:') {
+        this.logger.warn('REDIS_URL must use redis:// or rediss://; caching disabled.');
+        return;
+      }
+
+      this.client = new Redis(redisUrl, {
         maxRetriesPerRequest: 3,
         retryStrategy: (times) => Math.min(times * 50, 2000),
         lazyConnect: true,
       });
 
       this.client.on('error', (err) => {
-        this.logger.warn(`Redis connection error: ${err.message}. Caching disabled.`);
-        this.client = null;
+        this.logger.warn(`Redis connection error: ${err.message}.`);
       });
 
       this.client.connect().catch((err) => {
-        this.logger.warn(`Redis connect failed: ${err.message}. Caching disabled.`);
-        this.client = null;
+        this.logger.warn(`Redis connect failed: ${err.message}. Caching disabled until Redis recovers.`);
       });
     } else {
       this.logger.log('REDIS_URL not set; caching disabled.');

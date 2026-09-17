@@ -21,7 +21,10 @@ const ALLOWED_TRANSITIONS: Record<string, AppointmentStatus[]> = {
 
 @Injectable()
 export class AppointmentsService {
-  constructor(private readonly prisma: PrismaService) { }
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly paymentService: PaymentService,
+  ) { }
 
   // ── Book an appointment ───────────────────────────────────────────────────────
 
@@ -74,24 +77,9 @@ export class AppointmentsService {
     // 5. Build clinic address snapshot
     const clinicAddressSnapshot = `${doctor.clinicName}, ${doctor.addressLine}, ${doctor.city}, ${doctor.country}`;
 
-    // 6. Process payment (simulated). Require card info in DTO for confirmation.
-    const paymentSvc = new PaymentService();
-    const card = {
-      number: (dto as any).cardNumber,
-      expMonth: (dto as any).expMonth,
-      expYear: (dto as any).expYear,
-      cvc: (dto as any).cvc,
-      holderName: (dto as any).cardHolderName,
-    };
-
-    const paymentResult = await paymentSvc.processCardPayment(String(doctor.consultationPrice), doctor.currency, card as any);
-    if (!paymentResult.success) {
-      throw new BadRequestException(`Payment failed: ${paymentResult.reason}`);
-    }
-
-    // 7. Create appointment + invoice in a transaction
+    // 6. Create appointment + pending invoice before collecting payment in Stripe Elements.
     try {
-      const appointment = await this.prisma.$transaction(async (tx) => {
+      const { appointment, invoice } = await this.prisma.$transaction(async (tx) => {
         const appt = await tx.appointment.create({
           data: {
             patientId: patient.id,
@@ -118,7 +106,7 @@ export class AppointmentsService {
           },
         });
 
-        // Create invoice (paid)
+        // The webhook marks this invoice PAID after Stripe confirms the PaymentIntent.
         const count = await tx.invoice.count();
         const invoiceNumber = `INV-${String(count + 1).padStart(6, '0')}`;
         await tx.invoice.create({
@@ -127,9 +115,7 @@ export class AppointmentsService {
             invoiceNumber,
             amount: doctor.consultationPrice,
             currency: doctor.currency,
-            status: 'PAID',
-            paymentMethod: 'card',
-            paidAt: paymentResult.paidAt as Date,
+            status: 'PENDING',
           },
         });
 
@@ -160,14 +146,16 @@ export class AppointmentsService {
             action: 'APPOINTMENT_CREATED',
             entityType: 'Appointment',
             entityId: appt.id,
-            metadata: { doctorId: doctor.id, scheduledAt: dto.scheduledAt, paymentTx: paymentResult.transactionId },
+            metadata: { doctorId: doctor.id, scheduledAt: dto.scheduledAt },
           },
         });
 
-        return appt;
+        return { appointment: appt, invoice: await tx.invoice.findUnique({ where: { appointmentId: appt.id } }) };
       });
 
-      return appointment;
+      if (!invoice) throw new BadRequestException('Invoice could not be created');
+      const payment = await this.paymentService.createPaymentIntent(invoice.id, invoice.amount.toString(), invoice.currency);
+      return { ...appointment, clientSecret: payment.clientSecret, stripePublishableKey: process.env.STRIPE_PUBLISHABLE_KEY };
     } catch (err: any) {
       // P2002 = unique constraint violated → slot already taken
       if (err?.code === 'P2002') {

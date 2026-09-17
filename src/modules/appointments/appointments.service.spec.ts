@@ -41,7 +41,12 @@ describe('AppointmentsService', () => {
 
   beforeEach(() => {
     m = createPrismaMock();
-    service = new AppointmentsService(m.prisma as any);
+    service = new AppointmentsService(m.prisma as any, {
+      createPaymentIntent: jest.fn().mockResolvedValue({
+        clientSecret: 'pi_test_secret',
+        paymentIntentId: 'pi_test',
+      }),
+    } as any);
   });
 
   describe('create', () => {
@@ -49,7 +54,7 @@ describe('AppointmentsService', () => {
       m.prisma.patient.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.create('user-1', { doctorId: 'doc-1', scheduledAt: nextMondayAt9().toISOString(), cardNumber: '4242424242424242', expMonth: 12, expYear: 2030, cvc: '123' }),
+        service.create('user-1', { doctorId: 'doc-1', scheduledAt: nextMondayAt9().toISOString() }),
       ).rejects.toBeInstanceOf(ForbiddenException);
     });
 
@@ -58,7 +63,7 @@ describe('AppointmentsService', () => {
       m.prisma.doctor.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.create('user-1', { doctorId: 'doc-x', scheduledAt: nextMondayAt9().toISOString(), cardNumber: '4242424242424242', expMonth: 12, expYear: 2030, cvc: '123' }),
+        service.create('user-1', { doctorId: 'doc-x', scheduledAt: nextMondayAt9().toISOString() }),
       ).rejects.toBeInstanceOf(NotFoundException);
     });
 
@@ -67,7 +72,7 @@ describe('AppointmentsService', () => {
       m.prisma.doctor.findUnique.mockResolvedValue({ ...doctor, isAcceptingNewPatients: false });
 
       await expect(
-        service.create('user-1', { doctorId: 'doc-1', scheduledAt: nextMondayAt9().toISOString(), cardNumber: '4242424242424242', expMonth: 12, expYear: 2030, cvc: '123' }),
+        service.create('user-1', { doctorId: 'doc-1', scheduledAt: nextMondayAt9().toISOString() }),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
@@ -76,7 +81,7 @@ describe('AppointmentsService', () => {
       m.prisma.doctor.findUnique.mockResolvedValue(doctor);
 
       await expect(
-        service.create('user-1', { doctorId: 'doc-1', scheduledAt: '2020-01-01T09:00:00.000Z', cardNumber: '4242424242424242', expMonth: 12, expYear: 2030, cvc: '123' }),
+        service.create('user-1', { doctorId: 'doc-1', scheduledAt: '2020-01-01T09:00:00.000Z' }),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
@@ -87,7 +92,7 @@ describe('AppointmentsService', () => {
       monday.setHours(12, 30, 0, 0); // after 12:00 end
 
       await expect(
-        service.create('user-1', { doctorId: 'doc-1', scheduledAt: monday.toISOString(), cardNumber: '4242424242424242', expMonth: 12, expYear: 2030, cvc: '123' }),
+        service.create('user-1', { doctorId: 'doc-1', scheduledAt: monday.toISOString() }),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
@@ -98,17 +103,14 @@ describe('AppointmentsService', () => {
       m.tx.appointment.create.mockResolvedValue(appt);
       m.tx.notification.create.mockResolvedValue({});
       m.tx.auditLog.create.mockResolvedValue({});
-      m.tx.invoice.create.mockResolvedValue({});
+      m.tx.invoice.create.mockResolvedValue({ id: 'inv-1', amount: 100, currency: 'EUR' });
+      m.tx.invoice.findUnique.mockResolvedValue({ id: 'inv-1', amount: 100, currency: 'EUR' });
       m.tx.invoice.count.mockResolvedValue(0);
 
       const result = await service.create('user-1', {
         doctorId: 'doc-1',
         scheduledAt: nextMondayAt9().toISOString(),
         notes: 'hi',
-        cardNumber: '4242424242424242',
-        expMonth: 12,
-        expYear: 2030,
-        cvc: '123',
       });
 
       expect(result.id).toBe('appt-1');
@@ -137,7 +139,7 @@ describe('AppointmentsService', () => {
       });
 
       await expect(
-        service.create('user-1', { doctorId: 'doc-1', scheduledAt: nextMondayAt9().toISOString(), cardNumber: '4242424242424242', expMonth: 12, expYear: 2030, cvc: '123' }),
+        service.create('user-1', { doctorId: 'doc-1', scheduledAt: nextMondayAt9().toISOString() }),
       ).rejects.toBeInstanceOf(ConflictException);
     });
   });

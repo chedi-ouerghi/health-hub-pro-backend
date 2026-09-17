@@ -12,13 +12,16 @@ export const ConfigModule = NestConfigModule.forRoot({
     JWT_REFRESH_SECRET: Joi.string().min(32).required(),
     JWT_REFRESH_EXPIRES_IN: Joi.string().default('7d'),
     TWO_FACTOR_REQUIRED: Joi.boolean().default(false),
-    // CORRECTION M6 : CORS_ORIGINS
-    CORS_ORIGINS: Joi.string().default('http://localhost:3000'),
-    // CORRECTION B4 : FRONTEND_URL
-    FRONTEND_URL: Joi.string().uri().default('http://localhost:3000'),
+    CORS_ORIGINS: Joi.string().required(),
+    FRONTEND_URL: Joi.string().uri().required(),
     REDIS_URL: Joi.string().uri().optional(),
     SENTRY_DSN: Joi.string().uri().optional(),
     TURNSTILE_SECRET_KEY: Joi.string().optional(),
     RATE_LIMIT_WHITELIST: Joi.string().optional(),
+    RESEND_API_KEY: Joi.string().optional(),
+    RESEND_FROM_EMAIL: Joi.string().email().optional(),
+    STRIPE_SECRET_KEY: Joi.string().pattern(/^sk_test_/).required(),
+    STRIPE_PUBLISHABLE_KEY: Joi.string().pattern(/^pk_test_/).required(),
+    STRIPE_WEBHOOK_SECRET: Joi.string().pattern(/^whsec_/).required(),
   }),
 });

@@ -1,17 +1,18 @@
-import { Controller, Get, Patch, Post, Delete, Body, Param, Query } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
-import { UsersService } from './users.service';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { UpdatePatientProfileDto, UpdateDoctorProfileDto } from './dto/update-profile.dto';
-import {
-  ChangePasswordDto,
-  EnableTwoFactorDto,
-  DisableTwoFactorDto,
-  RequestPhoneVerificationDto,
-  ConfirmPhoneVerificationDto,
-  FilterMySessionsDto,
-} from './dto/security.dto';
 import { ParseCuidPipe } from '../../common/pipes/parse-uuid.pipe';
+import {
+    ChangePasswordDto,
+    ConfirmEmailVerificationDto,
+    DisableTwoFactorDto,
+    EnableTwoFactorDto,
+    FilterMySessionsDto,
+    RequestEmailVerificationDto,
+} from './dto/security.dto';
+import { UpdateDoctorProfileDto, UpdatePatientProfileDto } from './dto/update-profile.dto';
+import { UsersService } from './users.service';
 
 @ApiTags('Users')
 @ApiBearerAuth()
@@ -80,17 +81,31 @@ export class UsersController {
     return this.usersService.disableTwoFactor(userId, dto);
   }
 
-  // ── Phone verification ───────────────────────────────────────────────────────
+  // ── Email verification ───────────────────────────────────────────────────────
 
   @Post('me/phone/verify')
-  @ApiOperation({ summary: 'Send an SMS verification code to my phone' })
-  requestPhoneVerification(@CurrentUser('id') userId: string, @Body() dto: RequestPhoneVerificationDto) {
-    return this.usersService.requestPhoneVerification(userId, dto);
+  @Throttle({ default: { limit: 3, ttl: 60000 } })
+  @ApiOperation({ summary: 'Send an email verification code (legacy route)' })
+  requestEmailVerificationLegacy(@CurrentUser('id') userId: string, @Body() dto: RequestEmailVerificationDto) {
+    return this.usersService.requestEmailVerification(userId, dto);
   }
 
   @Post('me/phone/verify/confirm')
-  @ApiOperation({ summary: 'Confirm the SMS code and mark the phone as verified' })
-  confirmPhoneVerification(@CurrentUser('id') userId: string, @Body() dto: ConfirmPhoneVerificationDto) {
-    return this.usersService.confirmPhoneVerification(userId, dto);
+  @ApiOperation({ summary: 'Confirm the email code (legacy route)' })
+  confirmEmailVerificationLegacy(@CurrentUser('id') userId: string, @Body() dto: ConfirmEmailVerificationDto) {
+    return this.usersService.confirmEmailVerification(userId, dto);
+  }
+
+  @Post('me/email/verify')
+  @Throttle({ default: { limit: 3, ttl: 60000 } })
+  @ApiOperation({ summary: 'Send an email verification code' })
+  requestEmailVerification(@CurrentUser('id') userId: string, @Body() dto: RequestEmailVerificationDto) {
+    return this.usersService.requestEmailVerification(userId, dto);
+  }
+
+  @Post('me/email/verify/confirm')
+  @ApiOperation({ summary: 'Confirm the email code and mark the email as verified' })
+  confirmEmailVerification(@CurrentUser('id') userId: string, @Body() dto: ConfirmEmailVerificationDto) {
+    return this.usersService.confirmEmailVerification(userId, dto);
   }
 }

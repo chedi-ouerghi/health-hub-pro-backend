@@ -1,33 +1,33 @@
 import {
-  Injectable,
-  NotFoundException,
-  ForbiddenException,
-  BadRequestException,
-  ConflictException,
+    BadRequestException,
+    ConflictException,
+    ForbiddenException,
+    Injectable,
+    NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { PrismaService } from '../../prisma/prisma.service';
-import { SmsService } from '../../common/services/sms.service';
-import { UpdatePatientProfileDto, UpdateDoctorProfileDto } from './dto/update-profile.dto';
-import {
-  ChangePasswordDto,
-  EnableTwoFactorDto,
-  DisableTwoFactorDto,
-  RequestPhoneVerificationDto,
-  ConfirmPhoneVerificationDto,
-  FilterMySessionsDto,
-} from './dto/security.dto';
-import { hashPassword, verifyPassword } from '../../common/utils/hash.utils';
-import { encryptSecret, decryptSecret } from '../../common/utils/crypto.utils';
+import { NotificationType } from '@prisma/client';
 import { generateSecret, generateURI, verify } from 'otplib';
 import * as qrcode from 'qrcode';
-import { NotificationType } from '@prisma/client';
+import { EmailVerificationService } from '../../common/services/email-verification.service';
+import { decryptSecret, encryptSecret } from '../../common/utils/crypto.utils';
+import { hashPassword, verifyPassword } from '../../common/utils/hash.utils';
+import { PrismaService } from '../../prisma/prisma.service';
+import {
+    ChangePasswordDto,
+    ConfirmEmailVerificationDto,
+    DisableTwoFactorDto,
+    EnableTwoFactorDto,
+    FilterMySessionsDto,
+    RequestEmailVerificationDto,
+} from './dto/security.dto';
+import { UpdateDoctorProfileDto, UpdatePatientProfileDto } from './dto/update-profile.dto';
 
 @Injectable()
 export class UsersService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly sms: SmsService,
+    private readonly emailVerification: EmailVerificationService,
     private readonly config: ConfigService,
   ) {}
 
@@ -388,72 +388,60 @@ export class UsersService {
     return { message: 'Two-factor authentication disabled' };
   }
 
-  // ── Phone verification ───────────────────────────────────────────────────────
+  // ── Email verification ───────────────────────────────────────────────────────
 
-  async requestPhoneVerification(userId: string, dto: RequestPhoneVerificationDto) {
+  async requestEmailVerification(userId: string, dto: RequestEmailVerificationDto) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
 
-    const phone = (dto.phone ?? user.phone)?.trim();
-    if (!phone) throw new BadRequestException('A phone number is required to verify it');
-
-    if (dto.phone && dto.phone !== user.phone) {
-      try {
-        await this.prisma.user.update({ where: { id: userId }, data: { phone } });
-      } catch (err: any) {
-        if (err?.code === 'P2002') throw new ConflictException('Phone number already in use');
-        throw err;
-      }
-    }
-
-    const code = await this.sms.requestCode(userId, phone);
+    const email = (dto.email ?? user.email).trim();
+    const code = await this.emailVerification.requestCode(userId, email);
 
     await this.prisma.auditLog.create({
       data: {
         userId,
-        action: 'PHONE_VERIFICATION_REQUESTED',
+        action: 'EMAIL_VERIFICATION_CODE_REQUESTED',
         entityType: 'User',
         entityId: userId,
-        metadata: { phone },
+        metadata: { email },
       },
     });
 
     return {
       message: 'Verification code sent',
-      // In production, the code is sent by SMS only; dev convenience mirrors verificationToken
       ...(this.config.get('NODE_ENV') !== 'production' && { devCode: code }),
     };
   }
 
-  async confirmPhoneVerification(userId: string, dto: ConfirmPhoneVerificationDto) {
+  async confirmEmailVerification(userId: string, dto: ConfirmEmailVerificationDto) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
 
-    if (!this.sms.verifyCode(userId, dto.code)) {
+    if (!(await this.emailVerification.verifyCode(userId, dto.code))) {
       throw new BadRequestException('Invalid or expired verification code');
     }
 
     await this.prisma.$transaction([
-      this.prisma.user.update({ where: { id: userId }, data: { phoneVerifiedAt: new Date() } }),
+      this.prisma.user.update({ where: { id: userId }, data: { emailVerifiedAt: new Date() } }),
       this.prisma.notification.create({
         data: {
           userId,
           type: NotificationType.SYSTEM,
-          title: 'Téléphone vérifié',
-          body: 'Votre numéro de téléphone a été vérifié avec succès.',
+          title: 'Email vérifié',
+          body: 'Votre adresse email a été vérifiée avec succès.',
         },
       }),
       this.prisma.auditLog.create({
         data: {
           userId,
-          action: 'PHONE_VERIFIED',
+          action: 'EMAIL_VERIFIED',
           entityType: 'User',
           entityId: userId,
         },
       }),
     ]);
 
-    return { message: 'Phone number verified' };
+    return { message: 'Email address verified' };
   }
 
   private _encryptionKey(): string {

@@ -12,7 +12,7 @@ import { TransformInterceptor } from './common/interceptors/transform.intercepto
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  const app = await NestFactory.create(AppModule, { bufferLogs: true, rawBody: true });
 
   if (process.env.SENTRY_DSN) {
     Sentry.init({
@@ -50,8 +50,16 @@ async function bootstrap() {
 
   app.setGlobalPrefix('api/v1');
 
+  const allowedOrigins = [
+    'https://health-hub-pro.pages.dev',
+    'http://localhost:3000',
+    'http://localhost:8080',
+    'http://127.0.0.1:3000',
+    'http://127.0.0.1:8080',
+  ];
+
   app.enableCors({
-    origin: [process.env.FRONTEND_URL ?? 'http://localhost:3000'],
+    origin: allowedOrigins,
     credentials: true,
     methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
