@@ -1,28 +1,25 @@
 FROM node:20-alpine AS builder
 WORKDIR /app
 
-# install deps
+RUN apk add --no-cache python3 make g++
+
 COPY package.json package-lock.json* ./
 COPY tsconfig.json ./
-RUN npm ci --production=false
+RUN npm ci
 
-# copy source and build
 COPY prisma ./prisma
 COPY src ./src
-RUN npm run prisma:generate || true
+RUN npm run prisma:generate
 RUN npm run build
+RUN npm prune --omit=dev
 
 FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 
-# copy production deps
 COPY package.json package-lock.json* ./
-RUN npm ci --production
-
-# copy build artifacts
-COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/dist ./dist
 COPY prisma ./prisma
 
 EXPOSE 3000
