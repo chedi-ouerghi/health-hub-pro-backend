@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { MailService } from '../common/services/mail.service';
 import { createPrismaMock, PrismaMock } from '../test/prisma-mock';
 import { UserRole } from '@prisma/client';
 import { hashPassword, verifyPassword } from '../common/utils/hash.utils';
@@ -56,6 +57,14 @@ describe('AuthService', () => {
         { provide: PrismaService, useValue: prismaMock.prisma as unknown as PrismaService },
         { provide: JwtService, useValue: jwt },
         { provide: ConfigService, useValue: config },
+        {
+          provide: MailService,
+          useValue: {
+            isConfigured: false,
+            sendVerificationEmail: jest.fn().mockResolvedValue(false),
+            sendPasswordResetEmail: jest.fn().mockResolvedValue(false),
+          },
+        },
       ],
     }).compile();
 

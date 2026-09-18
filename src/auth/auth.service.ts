@@ -10,6 +10,7 @@ import { JwtService } from '@nestjs/jwt';
 import { DeviceType, UserRole } from '@prisma/client';
 import { randomBytes } from 'crypto';
 import { hashPassword, hashToken, verifyPassword } from '../common/utils/hash.utils';
+import { MailService } from '../common/services/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   ForgotPasswordDto,
@@ -29,6 +30,7 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
+    private readonly mail: MailService,
   ) {}
 
   // ── Register ────────────────────────────────────────────────────────────────
@@ -108,10 +110,13 @@ export class AuthService {
       return { user: newUser, verificationToken: rawToken };
     });
 
+    // Best-effort email delivery (never fails the registration).
+    await this.mail.sendVerificationEmail(user.user.email, user.verificationToken);
+
     return {
       message: 'Registration successful. Please verify your email.',
       userId: user.user.id,
-      // In production, send verificationToken via email; returned here for dev convenience
+      // In production, verificationToken is delivered by email; returned here for dev convenience
       ...(this.config.get('NODE_ENV') !== 'production' && { verificationToken: user.verificationToken }),
     };
   }
@@ -364,7 +369,10 @@ export class AuthService {
       },
     });
 
-    // In production: send email. Dev: return token.
+    // Best-effort email delivery (never leaks whether the account exists).
+    await this.mail.sendPasswordResetEmail(user.email, rawToken);
+
+    // In production, the reset link is delivered by email. Dev: return token.
     return {
       message: 'If this email exists, a reset link has been sent.',
       ...(this.config.get('NODE_ENV') !== 'production' && { resetToken: rawToken }),
