@@ -17,6 +17,7 @@ import {
   LoginDto,
   RefreshTokenDto,
   RegisterDto,
+  ResendVerificationDto,
   ResetPasswordDto,
   VerifyEmailDto,
 } from './dto/auth.dto';
@@ -111,7 +112,9 @@ export class AuthService {
     });
 
     // Best-effort email delivery (never fails the registration).
-    await this.mail.sendVerificationEmail(user.user.email, user.verificationToken);
+    await this.mail.sendVerificationEmail(user.user.email, user.verificationToken, {
+      firstName: dto.firstName,
+    });
 
     return {
       message: 'Registration successful. Please verify your email.',
@@ -346,6 +349,40 @@ export class AuthService {
     ]);
 
     return { message: 'Email verified successfully' };
+  }
+
+  // ── Resend verification email ────────────────────────────────────────────────
+
+  async resendVerificationEmail(dto: ResendVerificationDto) {
+    const user = await this.prisma.user.findUnique({
+      where: { email: dto.email, deletedAt: null },
+      include: { patient: true, doctor: true },
+    });
+
+    // Always return the same response to avoid user enumeration.
+    if (user && !user.emailVerifiedAt) {
+      const rawToken = randomBytes(32).toString('hex');
+      const tokenHash = hashToken(rawToken);
+
+      // Invalidate any previous unused tokens so they cannot be replayed.
+      await this.prisma.emailVerificationToken.updateMany({
+        where: { userId: user.id, usedAt: null },
+        data: { usedAt: new Date() },
+      });
+
+      await this.prisma.emailVerificationToken.create({
+        data: {
+          userId: user.id,
+          tokenHash,
+          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24h
+        },
+      });
+
+      const firstName = user.patient?.firstName ?? user.doctor?.firstName;
+      await this.mail.sendVerificationEmail(user.email, rawToken, { firstName });
+    }
+
+    return { message: 'If this email exists, a verification link has been sent.' };
   }
 
   // ── Forgot password ──────────────────────────────────────────────────────────

@@ -20,6 +20,7 @@ import {
   LogoutDto,
   VerifyEmailDto,
   ForgotPasswordDto,
+  ResendVerificationDto,
   ResetPasswordDto,
 } from './dto/auth.dto';
 import { Public } from '../common/decorators/public.decorator';
@@ -113,6 +114,15 @@ export class AuthController {
   @ApiOperation({ summary: 'Verify email address with token' })
   async verifyEmail(@Body() dto: VerifyEmailDto) {
     return this.authService.verifyEmail(dto);
+  }
+
+  @Public()
+  @Throttle({ default: { limit: 3, ttl: 60000 } })
+  @Post('resend-verification')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Resend the email verification link' })
+  async resendVerification(@Body() dto: ResendVerificationDto) {
+    return this.authService.resendVerificationEmail(dto);
   }
 
   // ── Forgot password ───────────────────────────────────────────────────────────

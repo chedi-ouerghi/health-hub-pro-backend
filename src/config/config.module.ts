@@ -20,6 +20,7 @@ export const ConfigModule = NestConfigModule.forRoot({
     RATE_LIMIT_WHITELIST: Joi.string().optional(),
     RESEND_API_KEY: Joi.string().optional(),
     RESEND_FROM_EMAIL: Joi.string().email().optional(),
+    BRAND_LOGO_URL: Joi.string().uri().optional(),
     STRIPE_SECRET_KEY: Joi.string().pattern(/^sk_test_/).required(),
     STRIPE_PUBLISHABLE_KEY: Joi.string().pattern(/^pk_test_/).required(),
     STRIPE_WEBHOOK_SECRET: Joi.string().pattern(/^whsec_/).required(),

@@ -356,6 +356,39 @@ describe('AuthService', () => {
     });
   });
 
+  describe('resendVerificationEmail', () => {
+    it('returns generic message for unknown email', async () => {
+      prismaMock.prisma.user.findUnique.mockResolvedValue(null as never);
+
+      const result = await service.resendVerificationEmail({ email: 'nobody@x.io' });
+
+      expect(result.message).toContain('If this email exists');
+      expect(prismaMock.prisma.emailVerificationToken.create).not.toHaveBeenCalled();
+    });
+
+    it('creates a fresh token and sends the email for an unverified user', async () => {
+      prismaMock.prisma.user.findUnique.mockResolvedValue({
+        id: 'user-1',
+        email: 'alice@x.io',
+        emailVerifiedAt: null,
+        patient: { firstName: 'Alice' },
+        doctor: null,
+      } as never);
+      prismaMock.prisma.emailVerificationToken.updateMany.mockResolvedValue({ count: 1 } as never);
+      prismaMock.prisma.emailVerificationToken.create.mockResolvedValue({ id: 'evt-2' } as never);
+
+      const result = await service.resendVerificationEmail({ email: 'alice@x.io' });
+
+      expect(result.message).toContain('If this email exists');
+      expect(prismaMock.prisma.emailVerificationToken.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ userId: 'user-1' }) }),
+      );
+      expect(prismaMock.prisma.emailVerificationToken.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ userId: 'user-1' }) }),
+      );
+    });
+  });
+
   describe('forgotPassword', () => {
     it('returns generic message for unknown email', async () => {
       prismaMock.prisma.user.findUnique.mockResolvedValue(null as never);

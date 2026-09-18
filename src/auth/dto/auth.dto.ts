@@ -107,6 +107,14 @@ export class VerifyEmailDto {
   token: string;
 }
 
+// ── Resend verification email ─────────────────────────────────────────────────
+
+export class ResendVerificationDto {
+  @ApiProperty({ example: 'alice@example.com' })
+  @IsEmail()
+  email: string;
+}
+
 // ── Forgot password ───────────────────────────────────────────────────────────
 
 export class ForgotPasswordDto {

@@ -20,6 +20,9 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
         maxRetriesPerRequest: 3,
         retryStrategy: (times) => Math.min(times * 50, 2000),
         lazyConnect: true,
+        // Upstash exposes rediss:// (TLS). Pass the option explicitly so TLS is
+        // enabled regardless of how ioredis parses the URL scheme.
+        tls: protocol === 'rediss:' ? {} : undefined,
       });
 
       this.client.on('error', (err) => {

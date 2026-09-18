@@ -48,6 +48,10 @@ async function bootstrap() {
   const uploadsDir = join(process.cwd(), process.env.UPLOAD_DIR ?? 'uploads');
   app.use('/uploads', express.static(uploadsDir));
 
+  // Serve brand assets (logo, etc.) statically — used by transactional emails
+  const assetsDir = join(process.cwd(), 'assets');
+  app.use('/assets', express.static(assetsDir));
+
   app.setGlobalPrefix('api/v1');
 
   const localOrigins = [
