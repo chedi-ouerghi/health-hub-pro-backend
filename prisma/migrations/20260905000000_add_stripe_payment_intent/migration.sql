@@ -1,2 +1,2 @@
-ALTER TABLE "invoices" ADD COLUMN "stripePaymentIntentId" TEXT;
-CREATE UNIQUE INDEX "invoices_stripePaymentIntentId_key" ON "invoices"("stripePaymentIntentId");
+ALTER TABLE "invoices" ADD COLUMN IF NOT EXISTS "stripePaymentIntentId" TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS "invoices_stripePaymentIntentId_key" ON "invoices"("stripePaymentIntentId");
