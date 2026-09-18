@@ -50,16 +50,44 @@ async function bootstrap() {
 
   app.setGlobalPrefix('api/v1');
 
-  const allowedOrigins = [
-    'https://health-hub-pro.pages.dev',
+  const localOrigins = [
     'http://localhost:3000',
     'http://localhost:8080',
     'http://127.0.0.1:3000',
     'http://127.0.0.1:8080',
+    'https://health-hub-pro.pages.dev',
   ];
 
+  const productionOrigins = [
+    'https://health-hub-pro-frontend.vercel.app',
+    // Any Vercel preview deployment: https://health-hub-pro-frontend-<hash>-chediouerghis-projects.vercel.app
+    (origin: string) => /^https:\/\/health-hub-pro-frontend-[a-z0-9-]+-chediouerghis-projects\.vercel\.app$/.test(origin),
+  ];
+
+  const envOrigins = (process.env.CORS_ORIGINS ?? '')
+    .split(',')
+    .map((o) => o.trim().replace(/\/+$/, ''))
+    .filter(Boolean);
+
+  const normalizeOrigin = (o: string) => o.replace(/\/+$/, '').toLowerCase();
+  const normalizedLocalOrigins = localOrigins.map(normalizeOrigin);
+
   app.enableCors({
-    origin: allowedOrigins,
+    origin(origin, callback) {
+      if (!origin) {
+        // Non-browser requests (server-to-server, health checks, webhooks).
+        callback(null, false);
+        return;
+      }
+      const normalizedRequestOrigin = normalizeOrigin(origin);
+      const allowed =
+        normalizedLocalOrigins.includes(normalizedRequestOrigin) ||
+        productionOrigins.some((allowedOrigin) =>
+          typeof allowedOrigin === 'function' ? allowedOrigin(origin) : normalizeOrigin(allowedOrigin) === normalizedRequestOrigin,
+        ) ||
+        envOrigins.some((allowedOrigin) => normalizeOrigin(allowedOrigin) === normalizedRequestOrigin);
+      callback(null, allowed ? origin : false);
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
